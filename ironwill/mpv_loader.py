@@ -3,8 +3,9 @@ import os
 import sys
 from pathlib import Path
 
-APP_DIR = Path(sys.argv[0]).resolve().parent
-SEARCH = [APP_DIR, APP_DIR / "mpv", Path(r"E:\MPV")]
+from .paths import APP_DIR
+
+SEARCH = [APP_DIR, APP_DIR / "mpv", Path(r"E:\MPV")]  # bundled copy first; E:\MPV is the author's dev setup
 DLL_NAMES = ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll")
 
 

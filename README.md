@@ -6,6 +6,12 @@
 surface and the depth of MPC-BE underneath, built on [mpv](https://mpv.io) so it plays virtually every video and audio
 format there is.
 
+## Download
+
+**[⬇ Download the latest release](https://github.com/TheB1gF1st/iron-will-media-player/releases/latest)**: a
+ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: unzip it anywhere and double-click
+**Iron Will.exe**. mpv and FFmpeg are included.
+
 ## Highlights
 
 **The look**
@@ -47,7 +53,7 @@ format there is.
   Put it in this folder or an `mpv` subfolder.
 - **FFmpeg** (only for Find Duplicates): put `ffmpeg.exe` and `ffprobe.exe` in an `ffmpeg` subfolder or on your PATH.
 
-## Getting started
+## Running from source
 
 ```bat
 pip install -r requirements.txt
@@ -65,6 +71,9 @@ python tools\register_windows.py
 
 If your Python isn't at the default location, put the path to `pythonw.exe` in a file called `python-path.txt` next to
 `IronWill.exe`.
+
+To build the ready-to-run release yourself: `pip install pyinstaller`, set the libmpv and FFmpeg paths at the top of
+`tools/build_release.py`, then run `python tools\build_release.py 1.0.0`.
 
 ## Keyboard basics
 

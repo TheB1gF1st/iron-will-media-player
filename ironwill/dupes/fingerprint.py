@@ -17,11 +17,13 @@ from pathlib import Path
 
 import numpy as np
 
+from ..paths import APP_DIR
+
 FRAME = 32
 MIN_GAP = 1.0          # keep at most one sample per second
 FLAT_STD = 6.0         # frames this uniform are skipped when matching
 CREATE_NO_WINDOW = 0x08000000
-FFMPEG_DIRS = [Path(__file__).resolve().parents[2] / "ffmpeg", Path(r"E:\_Misc\FFMpeg8.1.2EssentialsBuild\bin")]
+FFMPEG_DIRS = [APP_DIR / "ffmpeg", APP_DIR, Path(r"E:\_Misc\FFMpeg8.1.2EssentialsBuild\bin")]
 
 
 def find_tool(name):
