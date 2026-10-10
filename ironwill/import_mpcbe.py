@@ -1,0 +1,187 @@
+"""Read an MPC-BE settings file (mpc-be64.ini) and translate what has an Iron Will / mpv equivalent.
+Read-only: the MPC-BE file is never modified."""
+import configparser
+import os
+from pathlib import Path
+
+CANDIDATES = [
+    Path(os.environ.get("APPDATA", "")) / "MPC-BE" / "mpc-be64.ini",
+    Path(os.environ.get("APPDATA", "")) / "MPC-BE" / "mpc-be.ini",
+    Path(r"C:\Program Files\MPC-BE x64\mpc-be64.ini"),
+    Path(r"C:\Program Files\MPC-BE\mpc-be64.ini"),
+]
+
+# MPC-BE command ids (src/apps/mplayerc/resource.h) -> Iron Will mouse commands.
+MPC_COMMANDS = {
+    0: "none", 889: "play_pause", 890: "stop", 830: "fullscreen", 831: "fullscreen", 827: "mini",
+    949: "menu", 950: "menu", 907: "volume_up", 908: "volume_down", 909: "mute",
+    899: "seek_back", 901: "seek_back", 903: "seek_back", 900: "seek_fwd", 902: "seek_fwd", 904: "seek_fwd",
+    892: "frame_prev", 891: "frame_next", 921: "prev_file", 922: "next_file",
+    894: "speed_down", 895: "speed_up", 896: "speed_reset", 967: "repeat_toggle",
+    1202: "ab_a", 1203: "ab_b", 862: "zoom_in", 863: "zoom_out", 861: "view_reset", 876: "view_reset",
+    868: "pan_left", 869: "pan_right", 870: "pan_up", 871: "pan_down",
+    956: "sub_toggle", 954: "sub_next", 952: "audio_next", 806: "screenshot", 815: "options",
+}
+# MPC-BE ini key -> Iron Will gesture. Values are "normal;ctrl;shift;right-button-held".
+MPC_GESTURES = {"ButtonLeft": "left_click", "ButtonLeftDblClick": "left_dbl", "ButtonMiddle": "middle",
+                "ButtonX1": "x1", "ButtonX2": "x2", "WheelUp": "wheel_up", "WheelDown": "wheel_down",
+                "WheelLeft": "wheel_left", "WheelRight": "wheel_right"}
+
+
+def find_ini():
+    return next((p for p in CANDIDATES if p.exists()), None)
+
+
+def _bgr(value, alpha=None):
+    """MPC stores colors as 0xBBGGRR; mpv wants #RRGGBB (or #AARRGGBB)."""
+    v = int(value, 16) if isinstance(value, str) else int(value)
+    r, g, b = v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF
+    return f"#{alpha:02X}{r:02X}{g:02X}{b:02X}" if alpha is not None else f"#{r:02X}{g:02X}{b:02X}"
+
+
+def _langs(order):
+    """'eng' -> 'eng,en' so both 3- and 2-letter tags match."""
+    two = {"eng": "en", "jpn": "ja", "spa": "es", "fre": "fr", "fra": "fr", "ger": "de", "deu": "de",
+           "ita": "it", "por": "pt", "rus": "ru", "kor": "ko", "chi": "zh", "zho": "zh"}
+    out = []
+    for code in (c.strip() for c in order.replace(";", ",").split(",") if c.strip()):
+        out.append(code)
+        if code.lower() in two:
+            out.append(two[code.lower()])
+    return ",".join(dict.fromkeys(out))
+
+
+def _choice(order):
+    """'eng;jpn' -> 'en': the first language Iron Will has a choice for."""
+    from .settings import LANGUAGES
+    for code in (c.strip().lower() for c in order.replace(";", ",").split(",") if c.strip()):
+        for key, (codes, _pattern) in LANGUAGES.items():
+            if key and code in codes.split(","):
+                return key
+    return None
+
+
+def _mouse_slots(value, unknown):
+    slots = []
+    for part in (str(value).split(";") + ["0"] * 4)[:4]:
+        cid = int(part or 0)
+        if cid not in MPC_COMMANDS:
+            unknown.add(cid)
+        slots.append(MPC_COMMANDS.get(cid, "none"))
+    return slots
+
+
+def read(path):
+    """Returns (changes, notes): changes maps Iron Will setting keys to values; notes explain each one."""
+    cp = configparser.ConfigParser(interpolation=None, strict=False)
+    cp.optionxform = str
+    cp.read(path, encoding="utf-8-sig")
+    s = cp["Settings"] if cp.has_section("Settings") else {}
+    a = cp["Audio"] if cp.has_section("Audio") else {}
+    m = cp["Mouse"] if cp.has_section("Mouse") else {}
+    v = cp["Video"] if cp.has_section("Video") else {}
+    changes, notes = {}, []
+
+    def put(key, value, note):
+        changes[key] = value
+        notes.append(note)
+
+    if s.get("AudiosLanguageOrder"):
+        if _choice(s["AudiosLanguageOrder"]) is not None:
+            put("audio_lang", _choice(s["AudiosLanguageOrder"]), f"Preferred audio language: {s['AudiosLanguageOrder']}")
+    if s.get("SubtitlesLanguageOrder"):
+        if _choice(s["SubtitlesLanguageOrder"]) is not None:
+            put("sub_lang", _choice(s["SubtitlesLanguageOrder"]),
+                f"Preferred subtitle language: {s['SubtitlesLanguageOrder']}")
+    if "EnableSubtitles" in s:
+        on = s["EnableSubtitles"] == "1"
+        put("subs_auto", on, f"Subtitles on automatically: {'yes' if on else 'no'}")
+    if "AutoloadAudio" in s:
+        put("audio_file_auto", "fuzzy" if s["AutoloadAudio"] == "1" else "no", "Auto-load external audio files")
+    if s.get("SpeedStep", "").isdigit() and int(s["SpeedStep"]) > 0:
+        put("speed_step", int(s["SpeedStep"]), f"Speed step: {s['SpeedStep']}%")
+    if "VolumeStep" in s:
+        put("volume_step", int(s["VolumeStep"]), f"Volume step: {s['VolumeStep']}%")
+    if "JumpDistM" in s:
+        secs = max(1, round(int(s["JumpDistM"]) / 1000))
+        put("arrow_step", secs, f"Arrow-key jump: {secs} s (MPC-BE medium jump)")
+    if "LaunchFullScreen" in s:
+        put("start_fullscreen", s["LaunchFullScreen"] == "1", "Start in full screen")
+    if "ExitFullscreenAtTheEnd" in s:
+        put("exit_fs_at_end", s["ExitFullscreenAtTheEnd"] == "1", "Leave full screen at the end")
+    if "OnTop" in s:
+        mode = {"0": "never", "1": "always", "2": "playing", "3": "playing"}.get(s["OnTop"], "never")
+        put("on_top", mode, f"On top: {mode}")
+    if "Loop" in s:
+        put("loop_file", "inf" if s["Loop"] == "1" else "no", "Repeat")
+    if s.get("SnapShotExt"):
+        fmt = {".jpg": "jpg", ".jpeg": "jpg", ".png": "png", ".webp": "webp"}.get(s["SnapShotExt"].lower())
+        if fmt:
+            put("shot_format", fmt, f"Screenshot format: {fmt.upper()}")
+    if "SnapShotSubtitles" in s:
+        put("shot_subs", s["SnapShotSubtitles"] == "1", "Subtitles in screenshots")
+    if "TitleBarText" in s:
+        put("title_mode", "media" if s["TitleBarText"] == "2" else "file", "Title text")
+    if "RememberSelectedTracks" in s or "RememberFilePos" in s:
+        pass  # Iron Will always remembers positions (Player > History)
+
+    # Subtitle default style: l;t;r;b margins;type;?;border;?;shadow;?;colors(4);alphas(4);charset;font;size;...;weight
+    style = s.get("SPDefaultStyle", "")
+    parts = style.split(";")
+    if len(parts) >= 25:
+        try:
+            border = float(parts[6])
+            shadow = float(parts[8])
+            text_c, outline_c = _bgr(parts[10]), _bgr(parts[12])
+            font, size, weight = parts[19], float(parts[20]), int(parts[24])
+            mpv_size = round(size * 2.5)  # MPC sizes are for a 288-line script; mpv's are for 720 lines
+            put("sub_font", font, f"Subtitle font: {font}")
+            put("sub_font_size", mpv_size, f"Subtitle size: {size:g} (MPC-BE) → {mpv_size} (Iron Will)")
+            put("sub_bold", weight >= 600, f"Subtitle bold: {'yes' if weight >= 600 else 'no'}")
+            put("sub_color", text_c, f"Subtitle color: {text_c}")
+            put("sub_outline_color", outline_c, f"Subtitle outline color: {outline_c}")
+            put("sub_outline_size", round(border * 1.5, 1), f"Subtitle outline: {border:g}")
+            put("sub_shadow", round(shadow * 0.75, 1), f"Subtitle shadow: {shadow:g}")
+        except (ValueError, IndexError):
+            notes.append("Subtitle style: couldn't read it, skipped")
+
+    for key in ("ColorBrightness", "ColorContrast", "ColorSaturation", "ColorHue"):
+        if key in v:
+            ours = key.replace("Color", "").lower()
+            put(ours, int(float(v[key])), f"{ours.capitalize()}: {v[key]}")
+
+    if m:
+        from .settings import DEFAULT_MOUSE, GESTURES, MOUSE_COMMANDS
+        names, gesture_names = dict(MOUSE_COMMANDS), dict(GESTURES)
+        unknown, mouse = set(), {g: list(v) for g, v in DEFAULT_MOUSE.items()}
+        for key, gesture in MPC_GESTURES.items():
+            if key in m:
+                mouse[gesture] = _mouse_slots(m[key], unknown)
+                parts = [f"{col}: {names[c]}" for col, c in zip(("", "Ctrl", "Shift", "Right held"), mouse[gesture])
+                         if c != "none"]
+                notes.append(f"Mouse {gesture_names[gesture]} → " + (", ".join(parts).replace(": ", "", 1)
+                                                                     if parts else "nothing"))
+        changes["mouse"] = mouse
+        if unknown - {0}:
+            notes.append(f"Mouse commands with no Iron Will equivalent were left empty: {sorted(unknown)}")
+    if "EasyMove" in m:
+        put("easy_move", m["EasyMove"] == "1", "Drag the video to move the window: "
+            + ("on" if m["EasyMove"] == "1" else "off"))
+    if "LongPressLeftSpeed" in m:
+        on = m["LongPressLeftSpeed"] == "1"
+        put("longpress", on, "Hold left button to fast-forward: " + ("on" if on else "off"))
+        if m.get("LongPressLeftSpeedDelay"):
+            put("longpress_delay", int(m["LongPressLeftSpeedDelay"]), f"  …after {m['LongPressLeftSpeedDelay']} ms")
+        if m.get("LongPressLeftSpeedRate"):
+            put("longpress_speed", float(m["LongPressLeftSpeedRate"]), f"  …at {m['LongPressLeftSpeedRate']}x speed")
+
+    if a.get("AutoVolumeControl") == "1":
+        put("normalize", True, "Volume normalization: on")
+    else:
+        put("normalize", False, "Volume normalization: off")
+
+    skipped = ["Video renderer, EVR and filter settings (DirectShow-only; mpv handles this itself)",
+               "HLSL shaders (MPC-BE uses DirectX shaders; Iron Will uses GLSL shaders)",
+               "Keyboard shortcuts (none were customized)" if not cp.has_section("Commands2")
+               else "Custom keyboard shortcuts (different command system; set them under Player > Keys)"]
+    return changes, notes, skipped
