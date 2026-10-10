@@ -404,6 +404,7 @@ class MainWindow(QMainWindow):
     def stop(self):
         if not self.engine.path:
             return
+        self._keep_awake(False)
         self._remember_position(force=True)
         self.engine.mpv.command("stop")
         self.engine.path = ""
@@ -795,6 +796,7 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Continuing from {fmt_time(saved)}")
         else:
             self.engine.open(path)
+        self._keep_awake(not self.engine.mpv.pause)  # opening while already playing doesn't fire a pause change
         self.loop = {"a": None, "b": None}  # A-B markers belong to one file...
         self._sync_ab()
         self._restore_loop(path)  # ...and come back when that file is opened again
@@ -875,8 +877,17 @@ class MainWindow(QMainWindow):
         self.bar.seek.set_duration(d)
         self.bar.remaining.setText(fmt_time(d - self.position))
 
+    @staticmethod
+    def _keep_awake(on):
+        """While a video plays, stop Windows from starting the screensaver or sleeping. mpv only does this for
+        windows it creates itself; Iron Will draws mpv into its own window, so it has to ask Windows directly."""
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_DISPLAY_REQUIRED = 0x80000000, 0x00000001, 0x00000002
+        flags = ES_CONTINUOUS | (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED if on else 0)
+        ctypes.windll.kernel32.SetThreadExecutionState(ctypes.c_uint(flags))
+
     def _on_pause(self, paused):
         self.paused = paused
+        self._keep_awake(bool(self.engine.path) and not paused)
         self.bar.play.set_glyph(Glyph.PLAY if paused else Glyph.PAUSE)
         self.bar.play.setToolTip("Play (Space)" if paused else "Pause (Space)")
         # Pausing shows the controls, then they fade like they do while playing (mouse movement brings them back).
@@ -1606,6 +1617,7 @@ class MainWindow(QMainWindow):
         self._layout()
 
     def closeEvent(self, e):
+        self._keep_awake(False)
         self._remember_position(force=True)
         if self.mini_geometry is not None:
             self.toggle_mini()
