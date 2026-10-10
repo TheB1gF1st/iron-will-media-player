@@ -110,6 +110,9 @@ PAGES = [
     Page("window", "Window", "player", groups=[
         ("Size and position", [
             S("remember_geometry", "Remember window size and position", True),
+            S("keep_awake", "Keep the PC awake (no screensaver or sleep)", "visible",
+              [("visible", "While Iron Will is on screen (not minimized)"), ("playing", "Only while a video is playing"),
+               ("never", "Never: use Windows' normal timers")]),
             S("on_top", "Keep the player on top of other windows", "never",
               [("never", "Never"), ("always", "Always"), ("playing", "While playing")]),
             S("borderless", "Borderless window (no title bar or frame)", False,

@@ -482,6 +482,7 @@ class MainWindow(QMainWindow):
         self._update_neighbors()
         self._sync_ab()  # repeat on/off changes what an A-only marker does
         self._sync_border()
+        self._update_awake()
 
     def _sync_border(self):
         """Borderless window, like mpv's Window > Border: same size and place, no title bar or frame."""
@@ -796,7 +797,7 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Continuing from {fmt_time(saved)}")
         else:
             self.engine.open(path)
-        self._keep_awake(not self.engine.mpv.pause)  # opening while already playing doesn't fire a pause change
+        self._update_awake()  # opening while already playing doesn't fire a pause change
         self.loop = {"a": None, "b": None}  # A-B markers belong to one file...
         self._sync_ab()
         self._restore_loop(path)  # ...and come back when that file is opened again
@@ -885,9 +886,22 @@ class MainWindow(QMainWindow):
         flags = ES_CONTINUOUS | (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED if on else 0)
         ctypes.windll.kernel32.SetThreadExecutionState(ctypes.c_uint(flags))
 
+    def _update_awake(self):
+        """Options > Player > Window > Keep the PC awake: by default whenever Iron Will is on screen (not minimized),
+        playing or paused; or only while a video plays; or never."""
+        mode = self.cfg["keep_awake"]
+        on_screen = self.isVisible() and not self.isMinimized()
+        playing = bool(self.engine.path) and not self.paused
+        self._keep_awake(on_screen and (mode == "visible" or (mode == "playing" and playing)))
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() == QEvent.Type.WindowStateChange:  # minimized / restored
+            self._update_awake()
+
     def _on_pause(self, paused):
         self.paused = paused
-        self._keep_awake(bool(self.engine.path) and not paused)
+        self._update_awake()
         self.bar.play.set_glyph(Glyph.PLAY if paused else Glyph.PAUSE)
         self.bar.play.setToolTip("Play (Space)" if paused else "Pause (Space)")
         # Pausing shows the controls, then they fade like they do while playing (mouse movement brings them back).
@@ -1605,6 +1619,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, e):
         super().showEvent(e)
+        self._update_awake()
         try:  # dark title bar on Windows 10/11
             val = ctypes.c_int(1)
             ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 20, ctypes.byref(val), 4)
