@@ -51,13 +51,19 @@ class PlayerEngine(QObject):
         for name, fn in observers.items():
             self.mpv.observe_property(name, lambda _n, v, fn=fn: fn(v))
 
+        self._want_pause = False
+
         @self.mpv.event_callback("file-loaded")
         def _loaded(_event):
+            # keep-open pauses mpv when a file ends; re-apply the wanted state once the new file is in,
+            # or the next file in the folder would load paused
+            self.mpv.pause = self._want_pause
             self.file_loaded.emit(self.path)
 
     # Playback ----------------------------------------------------------------------------------------
     def open(self, path, start=None, paused=False):
         self.path = str(path)
+        self._want_pause = paused
         self.mpv.pause = paused
         for marker in ("ab-loop-a", "ab-loop-b"):  # A-B loops belong to one file, not the next
             self.mpv[marker] = "no"

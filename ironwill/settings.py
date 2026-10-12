@@ -24,6 +24,7 @@ class S:
     kind: str = ""                # "", "color", "font", "folder", "text", "device", "multiline"
     tip: str = ""
     to_mpv: object = None         # callable converting the stored value to what mpv expects
+    zero_text: str = ""           # number settings: what to show instead of 0 (e.g. "Never forget")
 
 
 @dataclass
@@ -64,7 +65,10 @@ PAGES = [
         ("History", [
             S("resume", "When I reopen a file I've watched", "ask",
               [("ask", "Ask: continue or start over"), ("always", "Continue automatically"),
-               ("never", "Always start from the beginning")]),
+               ("never", "Always start from the beginning")],
+              tip="Only when you open a file yourself. Moving to the next / previous file in a folder always starts it from the beginning."),
+            S("resume_days", "Forget where I left off after", 7, lo=0, hi=9999, suffix=" days", zero_text="Never forget",
+              tip="Type any number of days. Set it to 0 to never forget."),
             S("after_playback", "When a file ends", "next",
               [("next", "Play the next file in the folder"), ("next_loop", "Play the next file (start over after the last)"),
                ("nothing", "Do nothing"), ("close", "Close the file"), ("exit", "Exit Iron Will")]),

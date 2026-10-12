@@ -22,10 +22,14 @@ class ResumeStore:
     def _key(path):
         return str(path).lower()
 
-    def get(self, path):
-        """Saved position in seconds, or None if there's nothing worth resuming."""
+    def get(self, path, max_days=0):
+        """Saved position in seconds, or None if there's nothing worth resuming.
+        max_days > 0: a position older than that many days is forgotten."""
         entry = self.data.get(self._key(path))
         if not entry:
+            return None
+        if max_days and time.time() - entry.get("t", 0) > max_days * 86400:
+            self.forget(path)
             return None
         pos, dur = entry.get("pos", 0), entry.get("dur", 0)
         if pos < MIN_POS or (dur and pos > dur - END_MARGIN):

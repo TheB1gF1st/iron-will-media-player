@@ -320,6 +320,8 @@ class OptionsDialog(QDialog):
         if not is_int:
             spin.setDecimals(2 if s.step < 0.1 else 1)
         spin.setSuffix(s.suffix)
+        if s.zero_text and s.lo == 0:
+            spin.setSpecialValueText(s.zero_text)  # shown instead of "0 days" etc.
         spin.setMinimumWidth(110)
         if s.lo == -100 and s.hi == 100:
             w = QWidget()

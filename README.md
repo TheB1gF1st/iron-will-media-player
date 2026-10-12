@@ -23,7 +23,7 @@ ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: 
 **Playback**
 - Plays anything mpv/FFmpeg can (MKV, MP4, AVI, HEVC, AV1, …) with hardware decoding
 - **Next / previous file follows File Explorer's sort** (name, date, size…), not just A-Z, with optional looping
-- **"Welcome back" card:** continue where you left off or start over
+- **"Welcome back" card:** continue where you left off or start over (only for files you open yourself; next / previous and auto-play always start from the beginning, and positions are forgotten after 7 days by default, adjustable to any number of days)
 - **Preferred audio language** (e.g. always English, even when a file defaults to Japanese), with a title-based fallback
   for badly tagged files; subtitles start off until you want them
 - **A-B loop** markers on the timeline: draggable, toggle per marker, remembered per file

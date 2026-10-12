@@ -505,6 +505,7 @@ class MainWindow(QMainWindow):
             self.sysmenu.installed = False
             self.sysmenu.rebuild()
         self._set_topmost(self._topmost_wanted())
+        self._dwm_outline()
         self.toast.show_message("Border off  ·  Ctrl+B brings it back" if want else "Border on")
 
     @staticmethod
@@ -535,8 +536,29 @@ class MainWindow(QMainWindow):
         return edges
 
     def _set_topmost(self, on):
+        if not self.isVisible():
+            # Asking for winId() before the first show creates the native window early - with a border, even when
+            # the view is Minimal - and the half-converted window then won't go full screen. showEvent applies it.
+            return
         flag = -1 if on else -2  # HWND_TOPMOST / HWND_NOTOPMOST
         ctypes.windll.user32.SetWindowPos(int(self.winId()), flag, 0, 0, 0, 0, 0x0001 | 0x0002)
+
+    def _dwm_outline(self):
+        """Windows 11 draws a thin outline around every window, which shows as a white frame around full-screen
+        and borderless video. Turn it off there; keep the normal outline in the bordered views."""
+        if not self.isVisible():
+            return
+        DWMWA_CORNER, DWMWA_BORDER_COLOR = 33, 34
+        frameless = self.isFullScreen() or self.borderless
+        color = ctypes.c_uint(0xFFFFFFFE if frameless else 0xFFFFFFFF)  # DWMWA_COLOR_NONE / DEFAULT
+        corner = ctypes.c_uint(1 if frameless else 0)  # square corners there, so the video isn't notched
+        self.dwm_results = []
+        try:
+            hwnd = int(self.winId())
+            self.dwm_results.append(ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ctypes.byref(color), 4))
+            self.dwm_results.append(ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_CORNER, ctypes.byref(corner), 4))
+        except Exception:
+            pass  # Windows 10 has no outline or rounded corners
 
     def _topmost_wanted(self):
         mode = self.cfg["on_top"]
@@ -773,7 +795,9 @@ class MainWindow(QMainWindow):
         if path:
             self.open_path(path)
 
-    def open_path(self, path):
+    def open_path(self, path, browsing=False):
+        """browsing=True: reached with next / previous or at the end of a file, so it starts from the beginning
+        without the Continue / Start over card (that card is only for files you open yourself)."""
         path = Path(path)
         if path.suffix.lower() in SUB_EXTS and self.engine.path:
             self.engine.mpv.command("sub-add", str(path), "select")
@@ -785,9 +809,11 @@ class MainWindow(QMainWindow):
         self._remember_position(force=True)  # the file we're leaving
         self.prompt.hide()
         self.loaded_ok = False
-        saved = self.resume.get(path)
+        saved = self.resume.get(path, self.cfg["resume_days"])
         mode = self.cfg["resume"]
         mode = {True: "ask", False: "never"}.get(mode, mode)  # settings saved before the ask option existed
+        if browsing:
+            saved = None
         if saved and mode == "ask":
             self.engine.open(path, paused=True)  # first frame behind the card
             self.pending_resume = saved
@@ -850,7 +876,7 @@ class MainWindow(QMainWindow):
             return
         nxt = self._neighbor(step, self.folder_sort(Path(self.engine.path).parent))
         if nxt:
-            self.open_path(nxt)
+            self.open_path(nxt, browsing=True)
         else:
             self.toast.show_message("End of folder" if step > 0 else "First in folder")
 
@@ -1088,7 +1114,7 @@ class MainWindow(QMainWindow):
                 files = playlist.siblings(self.engine.path, spec)
                 nxt = files[0] if files else None
         if nxt:
-            QTimer.singleShot(400, lambda: self.open_path(nxt))
+            QTimer.singleShot(400, lambda: self.open_path(nxt, browsing=True))
         elif every == "exit":
             QTimer.singleShot(400, self.close)
         elif every == "close":
@@ -1271,12 +1297,14 @@ class MainWindow(QMainWindow):
             self.menuBar().setVisible(False)  # full screen is just the video
             self.showFullScreen()
             self.bar.full.set_glyph(Glyph.WINDOW)
+            self._dwm_outline()
 
     def exit_fullscreen(self):
         if self.isFullScreen():
             self.showMaximized() if self.was_maximized else self.showNormal()
             self.menuBar().setVisible(bool(self.cfg["show_menubar"]))
             self.bar.full.set_glyph(Glyph.FULL)
+            self._dwm_outline()
             self.caption.hide()
             self._sync_border()  # the border setting may have changed while in full screen
 
@@ -1625,6 +1653,9 @@ class MainWindow(QMainWindow):
             ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 20, ctypes.byref(val), 4)
         except Exception:
             pass
+        self._dwm_outline()
+        if self.mini_geometry is None:
+            self._set_topmost(self._topmost_wanted())
         if self.sysmenu is None:  # "Iron Will" submenu in the title-bar menu (right-click title bar / Alt+Space)
             from .menus import SystemMenu
             self.sysmenu = SystemMenu(self)
