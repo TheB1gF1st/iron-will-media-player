@@ -26,13 +26,19 @@ ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: 
 - **"Welcome back" card:** continue where you left off or start over (only for files you open yourself; next / previous and auto-play always start from the beginning, and positions are forgotten after 7 days by default, adjustable to any number of days)
 - **Preferred audio language** (e.g. always English, even when a file defaults to Japanese), with a title-based fallback
   for badly tagged files; subtitles start off until you want them
-- **A-B loop** markers on the timeline: draggable, toggle per marker, remembered per file
+- **A-B loop** markers on the timeline: draggable, toggle per marker, remembered per file, and **saved as their own
+  video clip** from a right-click on the seek bar (fast copy or frame-accurate)
+- **Window transparency** like Glass2K, built in: View → Transparency, Ctrl+Shift+↑/↓, or Ctrl+Shift+1…0
+- Seek-bar **picture preview**, chapter marks, and a full-screen clock
 - Playback rate in 5% steps (configurable) from the bottom bar, the menu or Ctrl+↑/↓
 - Click-and-hold: right third fast-forwards, left third rewinds
 
 **Power-user depth**
-- An **MPC-BE-style Options window** (21 pages): scalers, debanding, HDR tone mapping, shaders, audio output and
-  normalisation, subtitle styling, custom keys, cache, decoders, and any extra mpv option
+- An **MPC-BE-style Options window** (22 pages) with MPC-BE's options: default video frame, aspect override, scalers,
+  debanding, HDR tone mapping, color management, shaders, refresh-rate matching in full screen, audio output,
+  balance, gain and normalisation, subtitle styling, encodings and folders, remembered tracks, startup window size,
+  snap to edges, pause when minimized, tray icon, global media keys, taskbar progress and buttons, file types,
+  custom keys, cache, decoders, and any extra mpv option
 - **MPC-BE-style mouse bindings**: every button and wheel direction × Normal / Ctrl / Shift / right-button-held
 - **Import your MPC-BE settings** (languages, mouse setup, subtitle style, …) in one click
 - MPC-BE-style right-click and title-bar menus: Video Frame, Pan&Scan, Zoom, After Playback (incl. shutdown), Favorites,
@@ -86,6 +92,9 @@ To build the ready-to-run release yourself: `pip install pyinstaller`, set the l
 | PgUp / PgDn | Previous / next file | Ctrl+B | Border on / off |
 | Shift+S | Save current frame | Shift+F10 | Properties |
 | O | Options | Ctrl+D | Find Duplicates |
+| Ctrl+← / → | Small jump | Ctrl+U | Open URL |
+| F1 / F2 | Subtitle delay − / + | − / + | Audio delay − / + |
+| Ctrl+Shift+↑ / ↓ | More solid / more transparent | Ctrl+Shift+1…0 | Transparency 10%…100% |
 
 All shortcuts and mouse buttons can be changed in **Options → Player → Keys / Mouse**.
 
