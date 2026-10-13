@@ -298,6 +298,18 @@ class OptionsDialog(QDialog):
             row.addWidget(browse)
             self.fields[k] = (edit.text, edit.setText)
             return w, True
+        if s.kind == "file":
+            w = QWidget()
+            row = QHBoxLayout(w)
+            row.setContentsMargins(0, 0, 0, 0)
+            edit, browse = QLineEdit(), QPushButton("Browse…")
+            browse.clicked.connect(lambda: (lambda p: p and edit.setText(p))(
+                QFileDialog.getOpenFileName(self, "Choose a picture", edit.text(),
+                                            "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")[0]))
+            row.addWidget(edit, 1)
+            row.addWidget(browse)
+            self.fields[k] = (edit.text, edit.setText)
+            return w, True
         if s.kind == "multiline":
             w = QPlainTextEdit()
             w.setPlaceholderText("# examples\ndeband-grain=0\nsub-gauss=0.5")

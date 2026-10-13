@@ -86,6 +86,7 @@ def sections(win):
         Item("Close", win.stop, enabled=loaded),
         SEP,
         Item("Save Image…", win.save_frame, keys("screenshot"), enabled=loaded),
+        Item("Save Thumbnails…", win.save_thumbnails, enabled=loaded),
         Item("Open Screenshots Folder", lambda: _open_folder(cfg["shot_dir"])),
         SEP,
         Item("Load Subtitle…", win._add_subs, enabled=loaded),

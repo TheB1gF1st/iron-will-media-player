@@ -114,6 +114,9 @@ PAGES = [
             S("controls_gap", "Controls distance from the bottom edge", 24, lo=0, hi=96, step=2, suffix=" px",
               tip="Raise or lower the seek bar and buttons. 24 px is about a quarter inch on most screens."),
             S("show_menubar", "Show the menu bar (File, View, Play, Navigate, Favorites, Help)", False),
+            S("logo_file", "Start screen picture (empty = the Iron Will logo)", "", kind="file"),
+            S("taskbar", "Show progress and play / next buttons on the taskbar button", True),
+            S("global_media_keys", "Media keys work even when Iron Will isn't the active window", False),
             S("toast", "Show on-screen messages (volume, speed…)", True),
         ]),
         ("Seek bar", [
@@ -231,6 +234,9 @@ PAGES = [
               mpv="screenshot-format"),
             S("shot_jpeg_q", "JPEG quality", 92, mpv="screenshot-jpeg-quality", lo=10, hi=100),
             S("shot_subs", "Include subtitles in the picture", False),
+            S("thumb_cols", "Thumbnail sheet: columns", 4, lo=1, hi=10),
+            S("thumb_rows", "Thumbnail sheet: rows", 4, lo=1, hi=10),
+            S("thumb_width", "Thumbnail sheet: width", 1024, lo=320, hi=4096, step=32, suffix=" px"),
             S("shot_template", "File name pattern", "%F %wH.%wM.%wS", mpv="screenshot-template", kind="text",
               tip="%F = file name, %wH/%wM/%wS = time in the video, %n = counter"),
         ]),
@@ -337,6 +343,9 @@ PAGES = [
                ("1", "Monitor 1"), ("2", "Monitor 2"), ("3", "Monitor 3")]),
             S("exit_fs_focus", "Leave full screen when Iron Will loses focus", False),
             S("fs_controls", "Show the controls in full screen when the mouse moves", True),
+            S("fs_refresh", "Match the monitor's refresh rate to the video in full screen", False,
+              tip="MPC-BE: Auto-change full-screen monitor mode. 24 fps films switch the screen to 24/48/120 Hz "
+                  "if it supports it, and it switches back when you leave full screen."),
         ]),
     ]),
     Page("audio", "Audio", groups=[

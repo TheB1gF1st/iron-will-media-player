@@ -13,7 +13,7 @@ from PySide6.QtGui import (QAction, QColor, QCursor, QFont, QKeySequence, QLinea
 from PySide6.QtWidgets import (QFileDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QVBoxLayout, QWidget, QApplication, QPushButton)
 
-from .. import playlist
+from .. import display, playlist, taskbar
 from ..engine import PlayerEngine
 from ..settings import LANGUAGES, Config, apply_to_mpv
 from ..video_view import MpvVideoWidget
@@ -156,6 +156,7 @@ class Welcome(QWidget):
         lay.addStretch(1)
         # "I will" brush script from the Iron Will Fitness logo, scaled to the window in resizeEvent.
         self.logo_src = QPixmap(str(ASSETS / "i-will.png"))
+        self.default_logo = self.logo_src
         self.logo = QLabel()
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -184,8 +185,14 @@ class Welcome(QWidget):
         lay.addWidget(hint, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch(1)
 
+    def set_logo(self, path):
+        pm = QPixmap(path) if path else QPixmap()
+        self.logo_src = pm if not pm.isNull() else self.default_logo
+        self.resizeEvent(None)
+
     def resizeEvent(self, e):
-        super().resizeEvent(e)
+        if e is not None:
+            super().resizeEvent(e)
         width = int(min(560, max(220, self.width() * 0.42, 0)))
         width = min(width, int(self.height() * 1.0))
         ratio = self.devicePixelRatioF()
@@ -499,6 +506,14 @@ class MainWindow(QMainWindow):
             msg = ctypes.wintypes.MSG.from_address(int(message))
             if self.sysmenu and self.sysmenu.handle(msg):
                 return True, 0
+            if msg.message == 0x0312:  # WM_HOTKEY: global media keys
+                {1: self.engine.toggle_pause, 2: lambda: self.play_neighbor(1), 3: lambda: self.play_neighbor(-1),
+                 4: self.stop}.get(msg.wParam, lambda: None)()
+                return True, 0
+            if msg.message == 0x0111 and (msg.wParam >> 16) == 0x1800:  # WM_COMMAND / THBN_CLICKED: taskbar buttons
+                {101: lambda: self.play_neighbor(-1), 102: self.play_pause, 103: lambda: self.play_neighbor(1)}.get(
+                    msg.wParam & 0xFFFF, lambda: None)()
+                return True, 0
             if msg.message == 0x0216 and self.cfg["snap_edges"]:  # WM_MOVING
                 self._snap_rect(ctypes.wintypes.RECT.from_address(msg.lParam))
             elif msg.message == 0x0214 and self.cfg["limit_proportions"]:  # WM_SIZING
@@ -575,6 +590,10 @@ class MainWindow(QMainWindow):
         self.bar.seek.show_time = bool(c["seek_tooltip"])
         self.resume.max_entries = int(c["history_max"])
         self._update_clock()
+        self.welcome.set_logo(c["logo_file"])
+        self._register_media_keys(bool(c["global_media_keys"]))
+        if not c["taskbar"]:
+            self._taskbar_progress(None)
         if not int(c["recent_count"]):
             self.settings.setValue("recent", [])
         self._sync_tray()
@@ -843,6 +862,71 @@ class MainWindow(QMainWindow):
             files = [t.get("external-filename") for t in ext_subs if t.get("external-filename")]
             if files:
                 self.sub_watch.addPaths(files)
+
+    # Global media keys, taskbar, thumbnails, refresh rate -----------------------------------------------------
+    def _register_media_keys(self, on):
+        if not self.isVisible():
+            QTimer.singleShot(500, lambda: self._register_media_keys(on))
+            return
+        u32, hwnd = ctypes.windll.user32, ctypes.c_void_p(int(self.winId()))
+        for hid in (1, 2, 3, 4):
+            u32.UnregisterHotKey(hwnd, hid)
+        self.media_keys_on = False
+        if on:  # another app may already own them; RegisterHotKey simply fails then
+            vks = {1: 0xB3, 2: 0xB0, 3: 0xB1, 4: 0xB2}  # play/pause, next, previous, stop
+            self.media_keys_on = all(u32.RegisterHotKey(hwnd, hid, 0x4000, vk) for hid, vk in vks.items())
+
+    def _taskbar_progress(self, frac):
+        try:
+            tb = taskbar.get()
+            hwnd = int(self.winId())
+            if frac is None or not self.engine.path:
+                tb.set_state(hwnd, 0)
+            else:
+                tb.set_state(hwnd, 8 if self.paused else 2)  # TBPF_PAUSED (yellow) / TBPF_NORMAL
+                tb.set_value(hwnd, int(frac * 1000), 1000)
+                if not getattr(self, "thumb_buttons", False):
+                    self.thumb_buttons = tb.add_buttons(hwnd)
+                tb.set_play_glyph(hwnd, self.paused)
+        except Exception as exc:
+            log("taskbar:", exc)
+
+    def save_thumbnails(self):
+        """MPC-BE's File > Save Thumbnails: a grid of frames spread through the video, as one picture."""
+        from PySide6.QtCore import QProcess
+        from ..dupes.fingerprint import find_tool
+        src, dur = self.engine.path, self.duration
+        ffmpeg = find_tool("ffmpeg")
+        if not src or "://" in src or dur <= 0 or not ffmpeg:
+            return
+        cols, rows, width = int(self.cfg["thumb_cols"]), int(self.cfg["thumb_rows"]), int(self.cfg["thumb_width"])
+        n = cols * rows
+        default = Path(self.cfg["shot_dir"] or Path(src).parent) / f"{Path(src).stem} thumbnails.jpg"
+        out, _ = QFileDialog.getSaveFileName(self, "Save Thumbnails", str(default), "JPEG (*.jpg);;PNG (*.png)")
+        if not out:
+            return
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        cell = max(16, (width // cols) // 2 * 2)
+        args = ["-y", "-v", "error"]
+        for i in range(n):
+            args += ["-ss", f"{dur * (i + 0.5) / n:.2f}", "-i", src]
+        parts = [f"[{i}:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale={cell}:-2,setsar=1[t{i}]" for i in range(n)]
+        parts.append("".join(f"[t{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0,tile={cols}x{rows}:padding=4:margin=4")
+        args += ["-filter_complex", ";".join(parts), "-frames:v", "1", "-q:v", "3", out]
+        proc = QProcess(self)
+        self.thumb_proc = proc
+        proc.finished.connect(lambda code, _s: self.toast.show_message(
+            f"Thumbnails saved: {Path(out).name}" if code == 0 and Path(out).exists() else "Couldn't save thumbnails"))
+        proc.start(ffmpeg, args)
+        self.toast.show_message("Saving thumbnails…")
+
+    def _match_refresh(self):
+        if not self.isFullScreen() or not self.engine.path:
+            return
+        fps = float(self.engine.mpv._get_property("container-fps") or 0)
+        name = display.device_for_window(int(self.winId()))
+        if fps and display.match(name, fps):
+            self.toast.show_message(f"Screen set to {display.current_hz(name)} Hz for {fps:.3g} fps")
 
     def _sync_tray(self):
         if self.cfg["tray_icon"] and getattr(self, "tray", None) is None:
@@ -1237,6 +1321,9 @@ class MainWindow(QMainWindow):
         self.bar.seek.set_position(pos)
         self._show_times()
         self._remember_position()
+        if self.cfg["taskbar"] and self.duration > 0 and int(pos) != getattr(self, "taskbar_sec", -1):
+            self.taskbar_sec = int(pos)
+            self._taskbar_progress(pos / self.duration)
 
     def _on_duration(self, d):
         self.duration = d
@@ -1730,6 +1817,8 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
             self.bar.full.set_glyph(Glyph.WINDOW)
             self._update_clock()
+            if self.cfg["fs_refresh"]:
+                QTimer.singleShot(200, self._match_refresh)
             self._dwm_outline()
 
     def _fullscreen_screen(self):
@@ -1749,6 +1838,7 @@ class MainWindow(QMainWindow):
             self._dwm_outline()
             self.caption.hide()
             self._update_clock()
+            display.restore()
             self._sync_border()  # the border setting may have changed while in full screen
 
     def toggle_mini(self):
