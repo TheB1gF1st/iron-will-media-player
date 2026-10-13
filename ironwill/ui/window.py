@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, QSettings, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import (QAction, QColor, QCursor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPixmap,
-                           QRadialGradient)
+                           QGuiApplication, QRadialGradient)
 from PySide6.QtWidgets import (QFileDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QVBoxLayout, QWidget, QApplication, QPushButton)
 
@@ -202,6 +202,23 @@ class Welcome(QWidget):
         p.fillRect(self.rect(), g)
 
 
+# MPC-BE's Video Frame modes, mapped to mpv's scaling options.
+FRAME_PREFS = {"inside": {"keepaspect": True, "unscaled": "no", "panscan": 0.0},
+               "outside": {"keepaspect": True, "unscaled": "no", "panscan": 1.0},
+               "stretch": {"keepaspect": False, "unscaled": "no", "panscan": 0.0},
+               "normal": {"keepaspect": True, "unscaled": "yes", "panscan": 0.0},
+               "half": {"keepaspect": True, "unscaled": "yes", "panscan": 0.0},
+               "double": {"keepaspect": True, "unscaled": "yes", "panscan": 0.0}}
+
+
+def set_topmost(hwnd, on):
+    """Put a window in (or take it out of) the always-on-top band. The insert-after handle must be passed as a
+    pointer: a plain Python -1 goes through ctypes as a 32-bit int, which 64-bit Windows reads as an ordinary
+    window handle and silently ignores."""
+    after = ctypes.c_void_p(-1 if on else -2)  # HWND_TOPMOST / HWND_NOTOPMOST
+    ctypes.windll.user32.SetWindowPos(ctypes.c_void_p(hwnd), after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, start_file=None):
         super().__init__()
@@ -238,6 +255,7 @@ class MainWindow(QMainWindow):
         self.rewind_timer.timeout.connect(self._rewind_tick)
 
         self.cfg = Config()
+        self.tray, self.paused_by_minimize = None, False
         self.engine = PlayerEngine(self)
         failed = apply_to_mpv(self.engine.mpv, self.cfg.values)
         for label, err in failed:
@@ -323,6 +341,7 @@ class MainWindow(QMainWindow):
         e.mute_changed.connect(lambda _m: self._on_volume(e.volume))
         e.end_reached.connect(self._on_end)
         e.file_loaded.connect(self._on_loaded)
+        e.track_picked.connect(self._save_tracks)
 
         b.seek.seek_requested.connect(lambda s, exact: e.seek(s, exact))
         b.seek.loop_clear_requested.connect(self._clear_loop_from_timeline)
@@ -391,6 +410,16 @@ class MainWindow(QMainWindow):
         act("zoom_100", "Window size 100%", ["Alt+2"], lambda: self.fit_to_video(1.0))
         act("zoom_200", "Window size 200%", ["Alt+3"], lambda: self.fit_to_video(2.0))
         act("zoom_auto", "Window size: auto fit", ["Alt+4"], lambda: self.fit_to_video(None))
+        act("seek_back_small", "Small jump back", ["Ctrl+Left"], lambda: self.engine.skip(-self.cfg["small_step"]))
+        act("seek_fwd_small", "Small jump forward", ["Ctrl+Right"], lambda: self.engine.skip(self.cfg["small_step"]))
+        act("sub_delay_down", "Subtitle delay -", ["F1"],
+            lambda: self.nudge_delay("sub-delay", -self.cfg["sub_delay_step"] / 1000, "Subtitle delay"))
+        act("sub_delay_up", "Subtitle delay +", ["F2"],
+            lambda: self.nudge_delay("sub-delay", self.cfg["sub_delay_step"] / 1000, "Subtitle delay"))
+        act("audio_delay_down", "Audio delay -", ["-"],
+            lambda: self.nudge_delay("audio-delay", -self.cfg["audio_delay_step"] / 1000, "Audio delay"))
+        act("audio_delay_up", "Audio delay +", ["+", "="],
+            lambda: self.nudge_delay("audio-delay", self.cfg["audio_delay_step"] / 1000, "Audio delay"))
         act("menubar", "Show / hide the menu bar", ["Ctrl+0"], lambda: self.set_pref("show_menubar", not c["show_menubar"]))
         act("stats", "Statistics overlay", ["Ctrl+4", "Ctrl+J"], self.toggle_stats)
 
@@ -424,8 +453,11 @@ class MainWindow(QMainWindow):
             self.showNormal()
         ratio = self.devicePixelRatioF()
         area = self.screen().availableGeometry()
-        if scale is None:  # Auto Fit: as big as fits in 75% of the screen, keeping the video's shape
-            scale = min(area.width() * 0.75 * ratio / w, area.height() * 0.75 * ratio / h)
+        if scale is None or isinstance(scale, str):  # Auto Fit: as big as fits in a share of the screen
+            share = {"50": 0.5, "video": 1.0}.get(scale, 0.75)
+            scale = min(area.width() * share * ratio / w, area.height() * share * ratio / h)
+            if scale == "video" or share == 1.0:
+                scale = min(1.0, scale)  # the video's own size, shrunk only when it doesn't fit
         cw = min(int(w * scale / ratio), area.width() - 40)
         ch = min(int(h * scale / ratio), area.height() - 80)
         extra = self.menuBar().height() if self.menuBar().isVisible() else 0
@@ -439,11 +471,50 @@ class MainWindow(QMainWindow):
 
     def nativeEvent(self, event_type, message):
         # event_type arrives as a QByteArray, which never equals a plain bytes literal: convert first.
-        if bytes(event_type) == b"windows_generic_MSG" and self.sysmenu:
+        if bytes(event_type) == b"windows_generic_MSG":
             msg = ctypes.wintypes.MSG.from_address(int(message))
-            if self.sysmenu.handle(msg):
+            if self.sysmenu and self.sysmenu.handle(msg):
                 return True, 0
+            if msg.message == 0x0216 and self.cfg["snap_edges"]:  # WM_MOVING
+                self._snap_rect(ctypes.wintypes.RECT.from_address(msg.lParam))
+            elif msg.message == 0x0214 and self.cfg["limit_proportions"]:  # WM_SIZING
+                self._keep_proportions(ctypes.wintypes.RECT.from_address(msg.lParam), msg.wParam)
         return super().nativeEvent(event_type, message)
+
+    def _snap_rect(self, r, gap=16):
+        """Pull a window being dragged flush against the edges of its monitor's work area."""
+        area = self.screen().availableGeometry()
+        k = self.devicePixelRatioF()
+        L, T, Rt, B = (int(v * k) for v in (area.left(), area.top(), area.right() + 1, area.bottom() + 1))
+        w, h = r.right - r.left, r.bottom - r.top
+        if abs(r.left - L) < gap:
+            r.left, r.right = L, L + w
+        elif abs(r.right - Rt) < gap:
+            r.left, r.right = Rt - w, Rt
+        if abs(r.top - T) < gap:
+            r.top, r.bottom = T, T + h
+        elif abs(r.bottom - B) < gap:
+            r.top, r.bottom = B - h, B
+
+    def _keep_proportions(self, r, edge):
+        """While resizing, keep the video area the same shape as the video (MPC-BE: Limit window proportions)."""
+        vw = self.engine.mpv._get_property("dwidth") if self.engine.path else None
+        vh = self.engine.mpv._get_property("dheight") if self.engine.path else None
+        if not vw or not vh:
+            return
+        k = self.devicePixelRatioF()
+        frame_w = int((self.frameGeometry().width() - self.stage.width()) * k)
+        frame_h = int((self.frameGeometry().height() - self.stage.height()) * k)
+        w, h = r.right - r.left - frame_w, r.bottom - r.top - frame_h
+        if edge in (3, 6):  # top / bottom edge: width follows height
+            w = int(h * vw / vh)
+            r.right = r.left + w + frame_w
+        else:  # sides and corners: height follows width
+            h = int(w * vh / vw)
+            if edge in (3, 4, 5):  # top edges move the top
+                r.top = r.bottom - h - frame_h
+            else:
+                r.bottom = r.top + h + frame_h
 
     def action_table(self):
         """(id, label, default keys) for the Options > Keys page."""
@@ -474,6 +545,21 @@ class MainWindow(QMainWindow):
         self.bar.back.setToolTip(f"Back {c['skip_back']} seconds")
         self.bar.fwd.setToolTip(f"Forward {c['skip_fwd']} seconds")
         self.toast.enabled = c["toast"]
+        self.toast.set_style(c["osd_font"], c["osd_size"], c["osd_color"] or "#FFFFFF")
+        if not int(c["recent_count"]):
+            self.settings.setValue("recent", [])
+        self._sync_tray()
+        self._set_priority()
+        if c["video_frame"] != getattr(self, "applied_frame", c["video_frame"]):
+            # Options changed the default video frame: push the matching scaling options (only on a change, so the
+            # separate Keep Aspect Ratio checkbox still works on its own)
+            stale = {k: v for k, v in FRAME_PREFS.get(c["video_frame"], FRAME_PREFS["inside"]).items() if c[k] != v}
+            c.values.update(stale)
+            apply_to_mpv(self.engine.mpv, c.values, only=list(stale))
+            self._apply_video_zoom()
+        self.applied_frame = c["video_frame"]
+        if self.engine.path:
+            self._show_times()
         self.bar.title.setStyleSheet(f"color: {c['title_color'] or '#FFFFFF'};")
         if self.mini_geometry is None:
             self._set_topmost(self._topmost_wanted())
@@ -535,13 +621,41 @@ class MainWindow(QMainWindow):
             edges |= Qt.Edge.BottomEdge
         return edges
 
+    def _sync_tray(self):
+        if self.cfg["tray_icon"] and getattr(self, "tray", None) is None:
+            from PySide6.QtWidgets import QSystemTrayIcon
+            self.tray = QSystemTrayIcon(QApplication.windowIcon(), self)
+            self.tray.setToolTip("Iron Will Media Player")
+            menu = dark_menu(self, "Tray")
+            menu.addAction("Show Iron Will", self._restore_from_tray)
+            menu.addAction("Exit", self.close)
+            self.tray.setContextMenu(menu)
+            self.tray.activated.connect(lambda reason: reason == QSystemTrayIcon.ActivationReason.Trigger
+                                        and self._restore_from_tray())
+            self.tray.show()
+        elif not self.cfg["tray_icon"] and getattr(self, "tray", None) is not None:
+            self.tray.hide()
+            self.tray.deleteLater()
+            self.tray = None
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _set_priority(self):
+        cls = {"normal": 0x20, "above": 0x8000, "high": 0x80, "below": 0x4000}.get(self.cfg["priority"], 0x20)
+        try:
+            ctypes.windll.kernel32.SetPriorityClass(ctypes.c_void_p(-1), cls)  # -1 = this process (pointer-sized)
+        except Exception:
+            pass
+
     def _set_topmost(self, on):
         if not self.isVisible():
             # Asking for winId() before the first show creates the native window early - with a border, even when
             # the view is Minimal - and the half-converted window then won't go full screen. showEvent applies it.
             return
-        flag = -1 if on else -2  # HWND_TOPMOST / HWND_NOTOPMOST
-        ctypes.windll.user32.SetWindowPos(int(self.winId()), flag, 0, 0, 0, 0, 0x0001 | 0x0002)
+        set_topmost(int(self.winId()), on)
 
     def _dwm_outline(self):
         """Windows 11 draws a thin outline around every window, which shows as a white frame around full-screen
@@ -592,11 +706,16 @@ class MainWindow(QMainWindow):
         return spec
 
     def recent_files(self):
-        return [p for p in (self.settings.value("recent", []) or []) if Path(p).exists()][:15]
+        n = int(self.cfg["recent_count"])
+        return [p for p in (self.settings.value("recent", []) or []) if Path(p).exists()][:n] if n else []
 
     def _add_recent(self, path):
+        n = int(self.cfg["recent_count"])
+        if not n:
+            self.settings.setValue("recent", [])
+            return
         items = [str(path)] + [p for p in (self.settings.value("recent", []) or []) if p.lower() != str(path).lower()]
-        self.settings.setValue("recent", items[:20])
+        self.settings.setValue("recent", items[:n])
 
     def clear_recent(self):
         self.settings.setValue("recent", [])
@@ -631,24 +750,20 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"{label} {fmt.format(v)}")
 
     def video_frame_mode(self):
-        c, m = self.cfg, self.engine.mpv
-        zoom = float(m._get_property("video-zoom") or 0)
-        if c["unscaled"] == "yes":
-            return "half" if zoom <= -0.99 else "double" if zoom >= 0.99 else "normal"
-        if not c["keepaspect"]:
-            return "stretch"
-        return "outside" if float(c["panscan"]) >= 0.99 else "inside"
+        return self.cfg["video_frame"]
 
     def set_video_frame(self, mode):
         """MPC-BE's Video Frame modes, mapped to mpv's scaling options."""
-        prefs = {"inside": {"keepaspect": True, "unscaled": "no", "panscan": 0.0},
-                 "outside": {"keepaspect": True, "unscaled": "no", "panscan": 1.0},
-                 "stretch": {"keepaspect": False, "unscaled": "no", "panscan": 0.0},
-                 "normal": {"keepaspect": True, "unscaled": "yes", "panscan": 0.0},
-                 "half": {"keepaspect": True, "unscaled": "yes", "panscan": 0.0},
-                 "double": {"keepaspect": True, "unscaled": "yes", "panscan": 0.0}}[mode]
-        self.set_prefs(prefs)
-        self.engine.mpv._set_property("video-zoom", {"half": -1.0, "double": 1.0}.get(mode, 0.0))
+        prefs = FRAME_PREFS[mode]
+        self.applied_frame = mode
+        self.set_prefs({**prefs, "video_frame": mode})
+        self._apply_video_zoom()
+
+    def _apply_video_zoom(self):
+        try:
+            self.engine.mpv._set_property("video-zoom", {"half": -1.0, "double": 1.0}.get(self.cfg["video_frame"], 0.0))
+        except Exception:
+            pass
 
     def scale_axis(self, axis, delta):
         m = self.engine.mpv
@@ -807,6 +922,8 @@ class MainWindow(QMainWindow):
         self.folder_sort(path.parent)  # read Explorer's sort for this folder now, while it's likely open
         self._add_recent(path)
         self._remember_position(force=True)  # the file we're leaving
+        if not self.cfg["keep_speed"] and self.engine.path:
+            self.engine.set_speed(1.0)
         self.prompt.hide()
         self.loaded_ok = False
         saved = self.resume.get(path, self.cfg["resume_days"])
@@ -895,14 +1012,21 @@ class MainWindow(QMainWindow):
     def _on_position(self, pos):
         self.position = pos
         self.bar.seek.set_position(pos)
-        self.bar.elapsed.setText(fmt_time(pos))
-        self.bar.remaining.setText(fmt_time(self.duration - pos))
+        self._show_times()
         self._remember_position()
 
     def _on_duration(self, d):
         self.duration = d
         self.bar.seek.set_duration(d)
-        self.bar.remaining.setText(fmt_time(d - self.position))
+        self._show_times()
+
+    def _show_times(self):
+        ms = bool(self.cfg["show_ms"])
+        self.bar.elapsed.setText(fmt_time(self.position, ms))
+        if self.cfg["time_right"] == "total":
+            self.bar.remaining.setText(fmt_time(self.duration, ms))
+        else:
+            self.bar.remaining.setText("-" + fmt_time(self.duration - self.position, ms))
 
     @staticmethod
     def _keep_awake(on):
@@ -924,6 +1048,39 @@ class MainWindow(QMainWindow):
         super().changeEvent(e)
         if e.type() == QEvent.Type.WindowStateChange:  # minimized / restored
             self._update_awake()
+            if self.isMinimized():
+                if self.cfg["pause_minimized"] and self.engine.path and not self.paused:
+                    self.engine.mpv.pause = True
+                    self.paused_by_minimize = True
+                if self.cfg["tray_icon"] and self.tray is not None:
+                    QTimer.singleShot(0, self.hide)
+            elif getattr(self, "paused_by_minimize", False):
+                self.paused_by_minimize = False
+                self.engine.mpv.pause = False
+        elif e.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
+            if self.cfg["exit_fs_focus"] and self.isFullScreen():
+                self.exit_fullscreen()
+
+    def event(self, e):
+        # Qt replaces the native window when the OpenGL video surface first appears (and on some view changes).
+        # The new window starts without the on-top flag, dark title bar and outline settings, so re-apply them.
+        if e.type() == QEvent.Type.WinIdChange and self.isVisible():
+            QTimer.singleShot(0, self._reapply_native)
+        return super().event(e)
+
+    def _reapply_native(self):
+        if not self.isVisible():
+            return
+        try:
+            val = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 20, ctypes.byref(val), 4)
+        except Exception:
+            pass
+        self._dwm_outline()
+        if self.mini_geometry is None:
+            self._set_topmost(self._topmost_wanted())
+        else:
+            self._set_topmost(True)  # mini view always floats
 
     def _on_pause(self, paused):
         self.paused = paused
@@ -944,8 +1101,42 @@ class MainWindow(QMainWindow):
     def _on_loaded(self, path):
         self.loaded_ok = path == self.engine.path
         self._update_neighbors()
-        if self.loaded_ok:
-            self._enforce_languages()
+        if not self.loaded_ok:
+            return
+        self._enforce_languages()
+        self._restore_tracks()
+        self._apply_video_zoom()
+        try:
+            chapters = [c.get("time", 0) for c in (self.engine.mpv._get_property("chapter-list") or [])]
+        except Exception:
+            chapters = []
+        self.bar.seek.set_chapters(chapters if self.cfg["chapter_marks"] else [])
+        if self.cfg["auto_fit"] != "off" and not (self.isFullScreen() or self.isMaximized() or self.mini_geometry):
+            QTimer.singleShot(150, lambda: self.fit_to_video(self.cfg["auto_fit"]))
+        if self.cfg["osd_filename"]:
+            self.toast.show_message(Path(path).name)
+
+    def _save_tracks(self, kind, track_id):
+        if not (self.cfg["remember_tracks"] and self.engine.path and kind in ("audio", "sub")):
+            return
+        saved = dict(self.settings.value("tracks", {}) or {})
+        entry = dict(saved.get(self.engine.path.lower(), {}))
+        entry[kind] = track_id if track_id is not None else "no"
+        saved[self.engine.path.lower()] = entry
+        if len(saved) > 500:
+            saved = dict(list(saved.items())[-500:])
+        self.settings.setValue("tracks", saved)
+
+    def _restore_tracks(self):
+        if not self.cfg["remember_tracks"]:
+            return
+        entry = (self.settings.value("tracks", {}) or {}).get(self.engine.path.lower())
+        for kind, track_id in (entry or {}).items():
+            ids = {t["id"] for t in self.engine.tracks(kind)}
+            if track_id == "no" and kind == "sub":
+                self.engine.select_track(kind, None, remember=False)
+            elif track_id in ids:
+                self.engine.select_track(kind, track_id, remember=False)
 
     def _enforce_languages(self):
         """mpv already prefers the chosen language by track tag (alang/slang). This is the backup for files whose
@@ -967,7 +1158,7 @@ class MainWindow(QMainWindow):
                 continue
             want = next((t for t in tracks if matches(t)), None)
             if want:
-                self.engine.select_track(kind, want["id"])
+                self.engine.select_track(kind, want["id"], remember=False)
                 log("language preference: switched", kind, "to track", want["id"])
 
     def _loop_dragged(self, a, b):
@@ -1295,9 +1486,24 @@ class MainWindow(QMainWindow):
                 self.toggle_mini()
             self.was_maximized = self.isMaximized()
             self.menuBar().setVisible(False)  # full screen is just the video
+            target = self._fullscreen_screen()
+            if target is not None and target is not self.screen():
+                if self.was_maximized:
+                    self.showNormal()
+                self.windowHandle().setScreen(target)
+                self.move(target.geometry().topLeft())
             self.showFullScreen()
             self.bar.full.set_glyph(Glyph.WINDOW)
             self._dwm_outline()
+
+    def _fullscreen_screen(self):
+        mode = self.cfg["fs_monitor"]
+        screens = QGuiApplication.screens()
+        if mode == "primary":
+            return QGuiApplication.primaryScreen()
+        if mode.isdigit() and int(mode) <= len(screens):
+            return screens[int(mode) - 1]
+        return None
 
     def exit_fullscreen(self):
         if self.isFullScreen():
@@ -1310,7 +1516,6 @@ class MainWindow(QMainWindow):
 
     def toggle_mini(self):
         hwnd = int(self.winId())
-        HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE_NOSIZE = -1, -2, 0x0001 | 0x0002
         user32 = ctypes.windll.user32
         if self.mini_geometry is None:
             if self.isFullScreen():
@@ -1320,11 +1525,11 @@ class MainWindow(QMainWindow):
             area = self.screen().availableGeometry()
             w, h = {"small": (400, 225), "large": (720, 405)}.get(self.cfg["mini_size"], (560, 315))
             self.setGeometry(area.right() - w - 24, area.bottom() - h - 24, w, h)
-            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE_NOSIZE)
+            set_topmost(hwnd, True)
             self.bar.title.hide()
             self._layout()
         else:
-            user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE_NOSIZE)
+            set_topmost(hwnd, False)
             self.restoreGeometry(self.mini_geometry)
             self.mini_geometry = None
             self.bar.title.show()

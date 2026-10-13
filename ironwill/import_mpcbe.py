@@ -122,8 +122,64 @@ def read(path):
         put("shot_subs", s["SnapShotSubtitles"] == "1", "Subtitles in screenshots")
     if "TitleBarText" in s:
         put("title_mode", "media" if s["TitleBarText"] == "2" else "file", "Title text")
-    if "RememberSelectedTracks" in s or "RememberFilePos" in s:
-        pass  # Iron Will always remembers positions (Player > History)
+    if "RememberSelectedTracks" in s:
+        on = s["RememberSelectedTracks"] == "1"
+        put("remember_tracks", on, f"Remember picked audio/subtitle tracks: {'yes' if on else 'no'}")
+    if s.get("RecentFilesNumber", "").isdigit():
+        n = int(s["RecentFilesNumber"]) if s.get("KeepHistory", "1") == "1" else 0
+        put("recent_count", n, f"Recent files: {n}")
+    if "SpeedNotReset" in s:
+        put("keep_speed", s["SpeedNotReset"] == "1", "Keep speed for the next file: "
+            + ("yes" if s["SpeedNotReset"] == "1" else "no"))
+    if s.get("JumpDistS", "").isdigit():
+        secs = max(1, round(int(s["JumpDistS"]) / 1000))
+        put("small_step", secs, f"Ctrl+arrow jump: {secs} s (MPC-BE short jump)")
+    frame = {"0": "half", "1": "normal", "2": "double", "3": "stretch", "4": "inside", "5": "outside"}.get(
+        s.get("DefaultVideoFrame", ""))
+    if frame:
+        put("video_frame", frame, f"Default video frame: {frame}")
+    if s.get("KeepAspectRatio") == "0":
+        put("keepaspect", True, "Keep aspect ratio: left ON (MPC-BE had it off, which stretches 4:3 video to fill "
+                                "a wide window)")
+    if "RemainingTime" in s:
+        put("time_right", "remaining" if s["RemainingTime"] == "1" else "total",
+            "Right-hand time: " + ("remaining" if s["RemainingTime"] == "1" else "total length"))
+    for ini_key, ours, label in (("ShowMilliseconds", "show_ms", "Show milliseconds"),
+                                 ("ChapterMarker", "chapter_marks", "Chapter marks on the seek bar"),
+                                 ("SnapToDesktopEdges", "snap_edges", "Snap to screen edges"),
+                                 ("LimitWindowProportions", "limit_proportions", "Keep window proportions"),
+                                 ("PauseMinimizedVideo", "pause_minimized", "Pause when minimized"),
+                                 ("TrayIcon", "tray_icon", "Notification-area icon"),
+                                 ("ExitFullscreenAtFocusLost", "exit_fs_focus", "Leave full screen on focus loss")):
+        if ini_key in s:
+            put(ours, s[ini_key] == "1", f"{label}: {'on' if s[ini_key] == '1' else 'off'}")
+    if s.get("SubDelayInterval", "").isdigit():
+        put("sub_delay_step", int(s["SubDelayInterval"]), f"Subtitle delay step: {s['SubDelayInterval']} ms")
+    if s.get("Priority", "").isdigit():
+        pr = {32: "normal", 0x8000: "above", 128: "high", 0x4000: "below"}.get(int(s["Priority"]))
+        if pr:
+            put("priority", pr, f"Process priority: {pr}")
+    if s.get("FullScreenMonitor"):
+        put("fs_monitor", "current" if s["FullScreenMonitor"].lower() == "current" else "primary",
+            f"Full-screen monitor: {s['FullScreenMonitor']}")
+
+    def folders(value):  # ".;.\subtitles;.\*subs" -> "subtitles;*subs"
+        return ";".join(p.lstrip(".\\/") for p in value.split(";") if p.strip(" .\\/"))
+    if s.get("SubtitlePaths"):
+        put("sub_paths", folders(s["SubtitlePaths"]), f"Subtitle folders: {folders(s['SubtitlePaths'])}")
+    if s.get("AudioPaths"):
+        put("audio_paths", folders(s["AudioPaths"]), f"Audio folders: {folders(s['AudioPaths'])}")
+    if a.get("Balance", "").lstrip("-").isdigit() and int(a["Balance"]):
+        put("balance", int(a["Balance"]), f"Balance: {a['Balance']}")
+    osd = cp["OSD"] if cp.has_section("OSD") else {}
+    if osd.get("Font"):
+        put("osd_font", osd["Font"], f"On-screen message font: {osd['Font']}")
+    if osd.get("Size", "").isdigit():
+        put("osd_size", int(osd["Size"]), f"On-screen message size: {osd['Size']}")
+    if "FileName" in osd:
+        put("osd_filename", osd["FileName"] == "1", "Show file name on open: " + ("on" if osd["FileName"] == "1" else "off"))
+    if "ShowOSD" in osd:
+        put("toast", osd["ShowOSD"] == "1", "On-screen messages: " + ("on" if osd["ShowOSD"] == "1" else "off"))
 
     # Subtitle default style: l;t;r;b margins;type;?;border;?;shadow;?;colors(4);alphas(4);charset;font;size;...;weight
     style = s.get("SPDefaultStyle", "")

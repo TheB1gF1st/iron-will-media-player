@@ -39,9 +39,11 @@ def ui_font(size, weight=QFont.Weight.Normal):
     return f
 
 
-def fmt_time(seconds):
-    s = max(0, int(seconds))
-    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+def fmt_time(seconds, ms=False):
+    seconds = max(0.0, float(seconds))
+    s = int(seconds)
+    text = f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+    return f"{text}.{int((seconds - s) * 1000):03d}" if ms else text
 
 
 class IconButton(QAbstractButton):
@@ -131,6 +133,7 @@ class SeekBar(QWidget):
         self.duration, self.position = 0.0, 0.0
         self.hover_x, self.dragging = None, False
         self.loop = {"a": None, "b": None}  # A-B loop markers in seconds
+        self.chapters = []  # chapter start times in seconds, drawn as small ticks
         self.last_click = None  # (x, time) of the previous timeline click, for "same spot again clears the loop"
         self.marker_drag = None  # set while a loop tick is held
         self.setFixedHeight(48)  # top 26 px hold the hover time bubble
@@ -139,6 +142,10 @@ class SeekBar(QWidget):
 
     def set_duration(self, d):
         self.duration = d
+        self.update()
+
+    def set_chapters(self, times):
+        self.chapters = [t for t in times if t and t > 0]
         self.update()
 
     def set_loop_marker(self, which, seconds):
@@ -258,6 +265,12 @@ class SeekBar(QWidget):
         p.drawRoundedRect(QRectF(t.left(), y - thick / 2, t.width(), thick), thick / 2, thick / 2)
         p.setBrush(ACCENT)
         p.drawRoundedRect(QRectF(t.left(), y - thick / 2, px - t.left(), thick), thick / 2, thick / 2)
+        # Chapter marks: small light ticks across the line.
+        if self.duration > 0 and self.chapters:
+            p.setBrush(QColor(255, 255, 255, 200))
+            for sec in self.chapters:
+                cx = t.left() + t.width() * min(1.0, sec / self.duration)
+                p.drawRect(QRectF(cx - 1, y - thick / 2 - 2, 2, thick + 4))
         # A-B loop: amber ticks labeled A / B, with the looped stretch shaded when both are set.
         if self.duration > 0 and (self.loop["a"] is not None or self.loop["b"] is not None):
             def x_of(sec):
@@ -529,6 +542,10 @@ class Toast(QLabel):
         self.hide()
 
     enabled = True
+
+    def set_style(self, family, size, color):
+        self.setFont(QFont(family, int(size), QFont.Weight.DemiBold))
+        self.setStyleSheet(f"color: {color}; background: rgba(20,20,20,200); border-radius: 10px; padding: 8px 18px;")
 
     def show_message(self, text):
         if not self.enabled:

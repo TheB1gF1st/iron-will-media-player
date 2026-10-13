@@ -184,8 +184,8 @@ def sections(win):
     audio = tracks("audio", False) + [
         SEP,
         Item("Load External Audio…", win.add_audio_file, enabled=loaded),
-        Item("Delay +100 ms", lambda: win.nudge_delay("audio-delay", 0.1, "Audio delay"), enabled=loaded),
-        Item("Delay -100 ms", lambda: win.nudge_delay("audio-delay", -0.1, "Audio delay"), enabled=loaded),
+        Item(f"Delay +{cfg['audio_delay_step']} ms", lambda: win.nudge_delay("audio-delay", cfg["audio_delay_step"] / 1000, "Audio delay"), keys("audio_delay_up"), enabled=loaded),
+        Item(f"Delay -{cfg['audio_delay_step']} ms", lambda: win.nudge_delay("audio-delay", -cfg["audio_delay_step"] / 1000, "Audio delay"), keys("audio_delay_down"), enabled=loaded),
         Item("Reset Delay", lambda: _set(m, "audio-delay", 0), enabled=loaded),
         SEP,
         Item("Even Out Loud and Quiet Scenes", lambda: win.set_prefs({"normalize": not cfg["normalize"]}),
@@ -200,8 +200,8 @@ def sections(win):
         SEP,
         Item("Load External Subtitle…", win._add_subs, enabled=loaded),
         Item("Advanced", enabled=loaded, children=[
-            Item("Delay +100 ms", lambda: win.nudge_delay("sub-delay", 0.1, "Subtitle delay")),
-            Item("Delay -100 ms", lambda: win.nudge_delay("sub-delay", -0.1, "Subtitle delay")),
+            Item(f"Delay +{cfg['sub_delay_step']} ms", lambda: win.nudge_delay("sub-delay", cfg["sub_delay_step"] / 1000, "Subtitle delay"), keys("sub_delay_up")),
+            Item(f"Delay -{cfg['sub_delay_step']} ms", lambda: win.nudge_delay("sub-delay", -cfg["sub_delay_step"] / 1000, "Subtitle delay"), keys("sub_delay_down")),
             Item("Reset Delay", lambda: _set(m, "sub-delay", 0)),
             SEP,
             Item("Bigger", lambda: win.nudge_delay("sub-scale", 0.1, "Subtitle size", "{:.1f}x", 0.3, 4)),

@@ -23,6 +23,7 @@ class PlayerEngine(QObject):
     end_reached = Signal()
     tracks_changed = Signal(list)
     speed_changed = Signal(float)
+    track_picked = Signal(str, object)  # kind, id (None = off): only for choices the user made
     def __init__(self, parent=None):
         super().__init__(parent)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -107,9 +108,11 @@ class PlayerEngine(QObject):
     def tracks(self, kind):
         return [t for t in (self.mpv.track_list or []) if t.get("type") == kind]
 
-    def select_track(self, kind, track_id):
+    def select_track(self, kind, track_id, remember=True):
         prop = {"sub": "sid", "audio": "aid", "video": "vid"}[kind]
         setattr(self.mpv, prop, track_id if track_id is not None else "no")
+        if remember:
+            self.track_picked.emit(kind, track_id)
 
     def set_speed(self, speed):
         self.mpv.speed = speed

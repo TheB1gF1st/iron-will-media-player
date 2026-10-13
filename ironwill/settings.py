@@ -73,11 +73,21 @@ PAGES = [
               [("next", "Play the next file in the folder"), ("next_loop", "Play the next file (start over after the last)"),
                ("nothing", "Do nothing"), ("close", "Close the file"), ("exit", "Exit Iron Will")]),
             S("remember_volume", "Remember the volume between sessions", True),
+            S("remember_tracks", "Remember the audio and subtitle tracks I pick for each file", True,
+              tip="MPC-BE: Player > Remember selected audio and subtitle tracks"),
+            S("recent_count", "Recent files to remember", 20, lo=0, hi=100, zero_text="Don't keep a history",
+              tip="How many files File > Recent shows. 0 turns the history off and clears it."),
         ]),
         ("Opening files", [
             S("allow_multiple", "Allow multiple Iron Will windows (each video opens in its own window)", True,
               tip="Checked: every video you open gets its own window. Unchecked: new videos play in the window "
                   "that's already open. Takes effect the next time Iron Will starts."),
+            S("keep_speed", "Keep the playback speed when the next file opens", False,
+              tip="Off: every file starts at normal speed (MPC-BE's default)"),
+            S("auto_fit", "When a video opens, resize the window", "off",
+              [("off", "No, keep the window as it is"), ("video", "To the video's own size (shrunk to fit the screen)"),
+               ("50", "To fit within 50% of the screen"), ("75", "To fit within 75% of the screen")],
+              tip="Only in a normal window, not full screen, maximized or mini view"),
         ]),
         ("Title", [
             S("title_mode", "Title shows", "file", [("file", "File name"), ("media", "Media title (from tags)")]),
@@ -86,6 +96,7 @@ PAGES = [
             S("skip_back", "Back button jumps", 10, lo=1, hi=600, suffix=" s"),
             S("skip_fwd", "Forward button jumps", 30, lo=1, hi=600, suffix=" s"),
             S("arrow_step", "Left / Right arrow keys jump", 10, lo=1, hi=600, suffix=" s"),
+            S("small_step", "Ctrl + Left / Right jump", 1, lo=1, hi=600, suffix=" s"),
             S("volume_step", "Up / Down and wheel volume step", 5, lo=1, hi=25, suffix=" %"),
         ]),
     ]),
@@ -98,6 +109,18 @@ PAGES = [
               tip="Raise or lower the seek bar and buttons. 24 px is about a quarter inch on most screens."),
             S("show_menubar", "Show the menu bar (File, View, Play, Navigate, Favorites, Help)", False),
             S("toast", "Show on-screen messages (volume, speed…)", True),
+        ]),
+        ("Time display", [
+            S("time_right", "The time on the right shows", "remaining",
+              [("remaining", "Time remaining"), ("total", "Total length")]),
+            S("show_ms", "Show milliseconds", False),
+            S("chapter_marks", "Show chapter marks on the seek bar", True),
+        ]),
+        ("On-screen messages", [
+            S("osd_font", "Font", "Segoe UI", kind="font"),
+            S("osd_size", "Size", 16, lo=8, hi=48, suffix=" pt"),
+            S("osd_color", "Text color", "#FFFFFF", kind="color"),
+            S("osd_filename", "Show the file name when a file opens", False),
         ]),
     ]),
     Page("keys", "Keys", "player", special="keys",
@@ -121,6 +144,10 @@ PAGES = [
               [("never", "Never"), ("always", "Always"), ("playing", "While playing")]),
             S("borderless", "Borderless window (no title bar or frame)", False,
               tip="Drag the video to move it, drag its edges to resize. Ctrl+B or the title-bar menu toggles it."),
+            S("snap_edges", "Snap to screen edges when moving the window", False),
+            S("limit_proportions", "Keep the window's shape matching the video when resizing", False),
+            S("pause_minimized", "Pause when minimized", False),
+            S("tray_icon", "Show an icon in the notification area (minimizing hides to it)", False),
         ]),
         ("Mini view", [
             S("mini_size", "Mini view size", "medium",
@@ -186,6 +213,12 @@ PAGES = [
                ("nvdec-copy", "NVIDIA NVDEC (copy-back)"), ("no", "Off (software only)")], mpv="hwdec"),
         ]),
         ("Framing", [
+            S("video_frame", "Default video frame", "inside",
+              [("inside", "Touch window from inside (whole picture, bars if needed)"),
+               ("outside", "Touch window from outside (fills the window, crops edges)"),
+               ("stretch", "Stretch to window"), ("normal", "Normal size"), ("half", "Half size"),
+               ("double", "Double size")],
+              tip="MPC-BE: Playback > Default video frame. The View > Video Frame menu changes it too."),
             S("keepaspect", "Keep the original aspect ratio", True, mpv="keepaspect", to_mpv=YES_NO),
             S("unscaled", "Scaling", "no", [("no", "Fit to window"), ("downscale-big", "Only shrink, never enlarge"),
                                             ("yes", "Original pixel size")], mpv="video-unscaled"),
@@ -251,6 +284,10 @@ PAGES = [
         ("Full screen", [
             S("start_fullscreen", "Start files in full screen", False),
             S("exit_fs_at_end", "Leave full screen when the folder finishes", True),
+            S("fs_monitor", "Go full screen on", "current",
+              [("current", "The monitor the window is on"), ("primary", "The primary monitor"),
+               ("1", "Monitor 1"), ("2", "Monitor 2"), ("3", "Monitor 3")]),
+            S("exit_fs_focus", "Leave full screen when Iron Will loses focus", False),
         ]),
     ]),
     Page("audio", "Audio", groups=[
@@ -273,6 +310,10 @@ PAGES = [
               [("no", "No"), ("exact", "Exact name match"), ("fuzzy", "Similar names")], mpv="audio-file-auto"),
             S("audio_delay", "Audio delay", 0, mpv="audio-delay", lo=-5000, hi=5000, step=10, suffix=" ms",
               to_mpv=lambda v: v / 1000.0),
+            S("audio_delay_step", "Audio delay step (+ / - keys)", 10, lo=1, hi=1000, suffix=" ms"),
+            S("audio_paths", "Also look for audio files in these subfolders", "audio", kind="text",
+              mpv="audio-file-paths", to_mpv=lambda v: [x.strip() for x in v.replace(",", ";").split(";") if x.strip()],
+              tip="Separate folders with ;"),
         ]),
     ]),
     Page("soundproc", "Sound Processing", "audio", groups=[
@@ -281,6 +322,7 @@ PAGES = [
             S("night_mode", "Night mode (compress loud explosions)", False),
             S("downmix_norm", "Normalize volume when downmixing surround to stereo", False,
               mpv="audio-normalize-downmix", to_mpv=YES_NO),
+            S("balance", "Balance (left - / right +)", 0, lo=-100, hi=100, step=5),
         ]),
     ]),
     Page("subtitles", "Subtitles", groups=[
@@ -294,6 +336,10 @@ PAGES = [
             # Off by default: files open with no subtitle track; picking one from the subtitles button turns it on.
             S("subs_auto", "Turn subtitles on automatically when a file opens", False, mpv="sid",
               to_mpv=lambda v: "auto" if v else "no"),
+            S("sub_paths", "Also look for subtitles in these subfolders", "subs;subtitles", kind="text",
+              mpv="sub-file-paths", to_mpv=lambda v: [x.strip() for x in v.replace(",", ";").split(";") if x.strip()],
+              tip="Separate folders with ;"),
+            S("sub_delay_step", "Subtitle delay step (F1 / F2)", 500, lo=10, hi=5000, step=10, suffix=" ms"),
         ]),
     ]),
     Page("subrender", "Rendering", "subtitles", groups=[
@@ -351,6 +397,8 @@ PAGES = [
         ("Advanced", [
             S("custom_opts", "Extra mpv options (one per line: name=value)", "", kind="multiline"),
             S("log_file", "Write a debug log file", False),
+            S("priority", "Process priority", "normal",
+              [("normal", "Normal"), ("above", "Above normal"), ("high", "High"), ("below", "Below normal")]),
         ]),
     ]),
 ]
@@ -424,6 +472,8 @@ def _audio_filter_chain(v):
         chain.append("lavfi=[dynaudnorm=f=250:g=31:p=0.9]")
     if v.get("night_mode"):
         chain.append("lavfi=[acompressor=threshold=0.08:ratio=6:attack=20:release=250:makeup=2]")
+    if v.get("balance"):
+        chain.append(f"lavfi=[stereotools=balance_out={max(-1.0, min(1.0, v['balance'] / 100.0)):.2f}]")
     return ",".join(chain)
 
 
@@ -444,7 +494,7 @@ def apply_to_mpv(player, values, only=None):
             player[name] = value
         except Exception as exc:  # mpv rejects unknown values or options it can't change while playing
             failed.append((s.label, str(exc).split("\n")[0][:120]))
-    if only is None or {"normalize", "night_mode"} & set(only):
+    if only is None or {"normalize", "night_mode", "balance"} & set(only):
         try:
             player["af"] = _audio_filter_chain(values)
         except Exception as exc:
