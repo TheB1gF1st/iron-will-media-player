@@ -26,7 +26,7 @@ FOLDER_ORDERS = {  # Explorer sort strings for the fixed choices in Options
     "name": "prop:System.ItemNameDisplay;", "name_desc": "prop:-System.ItemNameDisplay;",
     "modified_old": "prop:System.DateModified;", "modified_new": "prop:-System.DateModified;",
     "created_old": "prop:System.DateCreated;", "created_new": "prop:-System.DateCreated;",
-    "size_small": "prop:System.Size;", "size_large": "prop:-System.Size;",
+    "size_small": "prop:System.Size;", "size_large": "prop:-System.Size;", "shuffle": "shuffle",
 }
 SUB_EXTS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup"}
 HIDE_AFTER_MS = 2500
@@ -257,6 +257,12 @@ class MainWindow(QMainWindow):
         self.cfg = Config()
         self.tray, self.paused_by_minimize = None, False
         self.opacity = int(self.cfg["opacity"])  # this window's transparency (View > Transparency), in percent
+        self.preview_proc, self.preview_want, self.clock = None, None, None
+        self.preview_timer = QTimer(self, singleShot=True, interval=180)
+        self.preview_timer.timeout.connect(self._grab_preview)
+        from PySide6.QtCore import QFileSystemWatcher
+        self.sub_watch = QFileSystemWatcher(self)
+        self.sub_watch.fileChanged.connect(self._sub_file_changed)
         self.engine = PlayerEngine(self)
         failed = apply_to_mpv(self.engine.mpv, self.cfg.values)
         for label, err in failed:
@@ -323,10 +329,14 @@ class MainWindow(QMainWindow):
         if self.cfg["remember_volume"]:
             self.engine.set_volume(float(self.settings.value("volume", 100)))
         geo = self.settings.value("geometry")
-        if geo is not None and self.cfg["remember_geometry"]:
+        if self.cfg["startup_size"] == "specified":
+            self.resize(int(self.cfg["startup_w"]), int(self.cfg["startup_h"]))
+        elif geo is not None and self.cfg["remember_geometry"]:
             self.restoreGeometry(geo)
         else:
             self.resize(1280, 760)
+        if self.cfg["remember_mute"]:
+            self.engine.mpv.mute = self.settings.value("mute", "false") in (True, "true")
         self._set_loaded(False)
         self.apply_settings()
         if start_file:
@@ -343,6 +353,8 @@ class MainWindow(QMainWindow):
         e.end_reached.connect(self._on_end)
         e.file_loaded.connect(self._on_loaded)
         e.track_picked.connect(self._save_tracks)
+        e.load_failed.connect(self._on_load_failed)
+        self.bar.seek.hover_changed.connect(self._seek_hover)
 
         b.seek.seek_requested.connect(lambda s, exact: e.seek(s, exact))
         b.seek.loop_clear_requested.connect(self._clear_loop_from_timeline)
@@ -412,6 +424,7 @@ class MainWindow(QMainWindow):
         act("zoom_200", "Window size 200%", ["Alt+3"], lambda: self.fit_to_video(2.0))
         act("zoom_auto", "Window size: auto fit", ["Alt+4"], lambda: self.fit_to_video(None))
         act("seek_back_small", "Small jump back", ["Ctrl+Left"], lambda: self.engine.skip(-self.cfg["small_step"]))
+        act("open_url", "Open URL…", ["Ctrl+U"], self.open_url)
         act("opacity_up", "More solid", ["Ctrl+Shift+Up"], lambda: self.set_opacity(self.opacity + 10))
         act("opacity_down", "More transparent", ["Ctrl+Shift+Down"], lambda: self.set_opacity(self.opacity - 10))
         for n in range(10):  # Glass2K's hotkeys: Ctrl+Shift+1 = 10% ... Ctrl+Shift+9 = 90%, Ctrl+Shift+0 = solid
@@ -447,6 +460,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Iron Will Media Player")
         self._set_loaded(False)
         self.video.update()
+        if self.cfg["reset_after_close"] and not (self.isFullScreen() or self.isMaximized()):
+            size = (int(self.cfg["startup_w"]), int(self.cfg["startup_h"])) \
+                if self.cfg["startup_size"] == "specified" else (1280, 760)
+            self.resize(*size)
 
     def fit_to_video(self, scale):
         w = self.engine.mpv._get_property("dwidth") if self.engine.path else None
@@ -551,7 +568,12 @@ class MainWindow(QMainWindow):
         self.bar.back.setToolTip(f"Back {c['skip_back']} seconds")
         self.bar.fwd.setToolTip(f"Forward {c['skip_fwd']} seconds")
         self.toast.enabled = c["toast"]
-        self.toast.set_style(c["osd_font"], c["osd_size"], c["osd_color"] or "#FFFFFF")
+        self.toast.set_style(c["osd_font"], c["osd_size"], c["osd_color"] or "#FFFFFF", c["osd_opacity"])
+        from . import widgets as _w
+        _w.ZERO_HOURS = bool(c["show_zero_hours"])
+        self.bar.seek.show_time = bool(c["seek_tooltip"])
+        self.resume.max_entries = int(c["history_max"])
+        self._update_clock()
         if not int(c["recent_count"]):
             self.settings.setValue("recent", [])
         self._sync_tray()
@@ -648,6 +670,119 @@ class MainWindow(QMainWindow):
         super().leaveEvent(e)
         if self.cfg["opacity_hover_solid"] and self.opacity < 100:
             self.setWindowOpacity(self.opacity / 100)
+
+    # Open URL, failed files, seek preview, clock, subtitle reload -------------------------------------------
+    def open_url(self):
+        from PySide6.QtWidgets import QInputDialog
+        clip = QGuiApplication.clipboard().text().strip() if self.cfg["paste_url"] else ""
+        start = clip if "://" in clip else ""
+        url, ok = QInputDialog.getText(self, "Open URL", "Address of a video or audio file (http, https, rtsp…):",
+                                       text=start)
+        url = url.strip()
+        if not ok or not url:
+            return
+        self._remember_position(force=True)
+        self.engine.open(url)
+        self._set_title(url.rsplit("/", 1)[-1] or url)
+        self._set_loaded(True)
+        self.show_chrome()
+
+    def _on_load_failed(self, path):
+        self.toast.show_message(f"Couldn't open {Path(path).name}")
+        if self.cfg["next_on_error"] and path and "://" not in path:
+            QTimer.singleShot(600, lambda: self.play_neighbor(1))
+
+    def _seek_hover(self, seconds, x):
+        if not self.cfg["seek_preview"] or seconds < 0 or not self.engine.path:
+            self.preview_timer.stop()
+            if getattr(self, "preview", None) is not None:
+                self.preview.hide()
+            return
+        self.preview_want = (seconds, x)
+        self.preview_timer.start()
+
+    def _grab_preview(self):
+        from PySide6.QtCore import QProcess
+        from ..dupes.fingerprint import find_tool
+        if self.preview_proc is not None or self.preview_want is None:
+            return  # one grab at a time; the newest request runs when this one finishes
+        seconds, x = self.preview_want
+        self.preview_want = None
+        ffmpeg = find_tool("ffmpeg")
+        if not ffmpeg:
+            return
+        width = int(self.cfg["seek_preview_size"])
+        out = Path(os.environ.get("TEMP", ".")) / f"ironwill-preview-{os.getpid()}.jpg"
+        proc = QProcess(self)
+        self.preview_proc = proc
+
+        def done(*_):
+            self.preview_proc = None
+            pix = QPixmap(str(out))
+            if not pix.isNull() and self.bar.seek.hover_x is not None:
+                self._show_preview(pix, x)
+            if self.preview_want is not None:
+                self._grab_preview()
+        proc.finished.connect(done)
+        proc.start(ffmpeg, ["-v", "error", "-y", "-ss", f"{seconds:.2f}", "-i", self.engine.path, "-frames:v", "1",
+                            "-vf", f"scale={width}:-2", "-q:v", "4", str(out)])
+
+    def _show_preview(self, pix, x):
+        if getattr(self, "preview", None) is None:
+            self.preview = QLabel(self.stage)
+            self.preview.setStyleSheet("border: 2px solid rgba(255,255,255,170); border-radius: 4px; background: black;")
+            self.preview.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.preview.setPixmap(pix)
+        self.preview.adjustSize()
+        seek = self.bar.seek
+        pos = seek.mapTo(self.stage, QPoint(int(x), 0))
+        left = min(max(pos.x() - self.preview.width() // 2, 8), self.stage.width() - self.preview.width() - 8)
+        self.preview.move(left, pos.y() - self.preview.height() - 4)
+        self.preview.show()
+        self.preview.raise_()
+
+    def _update_clock(self):
+        want = bool(self.cfg["osd_clock"]) and self.isFullScreen()
+        if want and self.clock is None:
+            self.clock = QLabel(self.stage)
+            self.clock.setStyleSheet("color: rgba(255,255,255,220); background: rgba(20,20,20,150); "
+                                     "border-radius: 8px; padding: 4px 12px;")
+            self.clock.setFont(QFont(self.cfg["osd_font"], 14, QFont.Weight.DemiBold))
+            self.clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.clock_timer = QTimer(self, interval=5000)
+            self.clock_timer.timeout.connect(self._update_clock)
+            self.clock_timer.start()
+        if self.clock is not None:
+            from datetime import datetime
+            self.clock.setText(datetime.now().strftime("%I:%M %p").lstrip("0"))
+            self.clock.setVisible(want)
+            self._layout()
+
+    def _sub_file_changed(self, path):
+        if self.cfg["sub_reload"] and self.engine.path:
+            QTimer.singleShot(300, lambda: self.engine.mpv.command("sub-reload"))
+            if path not in self.sub_watch.files() and Path(path).exists():
+                self.sub_watch.addPath(path)  # editors that replace the file drop it from the watch list
+
+    def _external_tracks(self):
+        """Subtitle / audio preferences that mpv has no option for: external vs. embedded tracks."""
+        e = self.engine
+        subs = e.tracks("sub")
+        ext_subs = [t for t in subs if t.get("external")]
+        selected = next((t for t in subs if t.get("selected")), None)
+        if self.cfg["ignore_embedded_subs"] and selected is not None and not selected.get("external"):
+            e.select_track("sub", ext_subs[0]["id"] if ext_subs else None, remember=False)
+        elif self.cfg["prefer_external_subs"] and selected is not None and not selected.get("external") and ext_subs:
+            e.select_track("sub", ext_subs[0]["id"], remember=False)
+        ext_audio = [t for t in e.tracks("audio") if t.get("external")]
+        if self.cfg["prefer_external_audio"] and ext_audio:
+            e.select_track("audio", ext_audio[0]["id"], remember=False)
+        if self.sub_watch.files():
+            self.sub_watch.removePaths(self.sub_watch.files())
+        if self.cfg["sub_reload"]:
+            files = [t.get("external-filename") for t in ext_subs if t.get("external-filename")]
+            if files:
+                self.sub_watch.addPaths(files)
 
     def _sync_tray(self):
         if self.cfg["tray_icon"] and getattr(self, "tray", None) is None:
@@ -836,7 +971,7 @@ class MainWindow(QMainWindow):
             self.toast.show_message("That file isn't there anymore")
             return
         self.open_path(fav["path"])
-        if fav.get("pos"):
+        if fav.get("pos") and self.cfg["fav_position"]:
             self.prompt.hide()
             self.pending_resume = None
             self.engine.mpv.pause = False
@@ -1007,7 +1142,7 @@ class MainWindow(QMainWindow):
         """The next / previous file in the folder. With After Playback set to 'Play next in the folder (looped)'
         the folder wraps around: after the last file comes the first, before the first comes the last."""
         path = self.engine.path
-        if not path:
+        if not path or "://" in path:
             return None
         nxt = playlist.neighbor(path, step, spec)
         if nxt is None and self.cfg["after_playback"] == "next_loop":
@@ -1125,6 +1260,7 @@ class MainWindow(QMainWindow):
         self.bar.volume.set_glyph(volume_glyph(v, muted))
         self.flyout.set_volume(v, muted)
         self.settings.setValue("volume", v)
+        self.settings.setValue("mute", muted)
 
     def _on_loaded(self, path):
         self.loaded_ok = path == self.engine.path
@@ -1132,6 +1268,7 @@ class MainWindow(QMainWindow):
         if not self.loaded_ok:
             return
         self._enforce_languages()
+        self._external_tracks()
         self._restore_tracks()
         self._apply_video_zoom()
         try:
@@ -1336,6 +1473,12 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(400, lambda: self.open_path(nxt, browsing=True))
         elif every == "exit":
             QTimer.singleShot(400, self.close)
+        elif every == "rewind":
+            self.engine.seek(0)
+            self.engine.mpv.pause = True
+            self.show_chrome(stay=True)
+        elif every == "close_minimize":
+            QTimer.singleShot(400, lambda: (self.stop(), self.showMinimized()))
         elif every == "close":
             QTimer.singleShot(400, self.stop)
         else:
@@ -1471,6 +1614,9 @@ class MainWindow(QMainWindow):
     # Chrome visibility -----------------------------------------------------------------------------------
     def show_chrome(self, stay=False):
         self.video.unsetCursor()
+        if self.isFullScreen() and not self.cfg["fs_controls"] and not stay and not self.paused and self.engine.path:
+            self.hide_timer.start()  # full screen without controls: just show the pointer for a moment
+            return
         if not self.chrome_visible:
             self.chrome_visible = True
             self.bar.setVisible(bool(self.engine.path))
@@ -1491,7 +1637,8 @@ class MainWindow(QMainWindow):
         self.chrome_visible = False
         self._animate(0.0)
         self._drop_orb(False)
-        self.video.setCursor(Qt.CursorShape.BlankCursor)
+        if self.isFullScreen() or self.cfg["hide_cursor_window"]:
+            self.video.setCursor(Qt.CursorShape.BlankCursor)
 
     def _animate(self, target):
         self.fade.stop()
@@ -1522,6 +1669,7 @@ class MainWindow(QMainWindow):
                 self.move(target.geometry().topLeft())
             self.showFullScreen()
             self.bar.full.set_glyph(Glyph.WINDOW)
+            self._update_clock()
             self._dwm_outline()
 
     def _fullscreen_screen(self):
@@ -1540,6 +1688,7 @@ class MainWindow(QMainWindow):
             self.bar.full.set_glyph(Glyph.FULL)
             self._dwm_outline()
             self.caption.hide()
+            self._update_clock()
             self._sync_border()  # the border setting may have changed while in full screen
 
     def toggle_mini(self):
@@ -1580,6 +1729,9 @@ class MainWindow(QMainWindow):
             + (54 if self.bar.play.isVisibleTo(self.bar) else 0) + 20
         self.bar.setGeometry(0, h - bar_h, w, bar_h)
         self.caption.move(w - self.caption.width(), 0)
+        if self.clock is not None:
+            self.clock.adjustSize()
+            self.clock.move(w - self.clock.width() - 24, 18)
         self._place_orb(self.orb_shown)
         self.prompt.move((w - self.prompt.width()) // 2, (h - self.prompt.height()) // 2)
         self.prev_btn.move(6, (h - self.prev_btn.height()) // 2)  # vertically centred on the video

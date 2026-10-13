@@ -5,6 +5,8 @@ modified, date created, size, type; ascending or descending) is read from that w
 you see next. Names compare the way Explorer does (Ep 2 before Ep 10) via Windows' own StrCmpLogicalW."""
 import ctypes
 import functools
+import hashlib
+import os
 from pathlib import Path
 
 MEDIA_EXTS = {
@@ -59,7 +61,12 @@ def _key_value(p, prop):
     return None  # name-like columns: compared with Explorer's logical name order
 
 
+SHUFFLE_SEED = os.urandom(8)
+
+
 def sort_files(files, spec=NAME_SORT):
+    if spec == "shuffle":
+        return sorted(files, key=lambda f: hashlib.sha1(SHUFFLE_SEED + str(f).lower().encode()).digest())
     keys = parse_sort(spec)
 
     def compare(a, b):

@@ -247,16 +247,16 @@ def sections(win):
 
     # View ------------------------------------------------------------------------------------------------
     on_top = cfg["on_top"]
+    transparency = [Item("Solid (100%)" if pct == 100 else f"{pct}%", lambda p=pct: win.set_opacity(p),
+                         keys(f"opacity_{pct}"), checked=win.opacity == pct)
+                    for pct in (100, 90, 80, 70, 60, 50, 40, 30, 20, 10)]
     view = [
         Item("On Top", children=[
             Item("Never", lambda: win.set_prefs({"on_top": "never"}), checked=on_top == "never"),
             Item("Always", lambda: win.set_prefs({"on_top": "always"}), checked=on_top == "always"),
             Item("While Playing", lambda: win.set_prefs({"on_top": "playing"}), checked=on_top == "playing"),
         ]),
-        Item("Transparency", children=[
-            Item("Solid (100%)" if pct == 100 else f"{pct}%", lambda p=pct: win.set_opacity(p),
-                 checked=win.opacity == pct)
-            for pct in (100, 90, 80, 70, 60, 50, 40, 30, 20)]),
+        Item("Transparency", children=transparency),
         SEP,
         Item("Hide Menu", lambda: win.set_prefs({"show_menubar": not cfg["show_menubar"]}), keys("menubar"),
              checked=not cfg["show_menubar"]),
@@ -289,6 +289,7 @@ def sections(win):
         "file": file_menu, "repeat": repeat, "zoom": zoom, "video_frame": video_frame, "pan": pan,
         "navigate": navigate, "favorites": favorites, "shaders": shaders, "audio": audio, "subtitles": subtitles,
         "volume": volume, "speed": playback_speed, "after": after, "view": view, "renderer": renderer,
+        "transparency": transparency,
         "play_pause": Item("Play/Pause", win.play_pause, keys("play_pause"), checked=loaded and not win.paused,
                            enabled=loaded),
         "stop": Item("Stop", win.stop, enabled=loaded),
@@ -327,6 +328,7 @@ def build(win):
         Item("After Playback", children=s["after"]),
         SEP,
         Item("View", children=s["view"]),
+        Item("Transparency", children=s["transparency"]),
         SEP,
         Item("Renderer Settings", children=s["renderer"]),
         SEP,

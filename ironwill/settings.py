@@ -71,8 +71,12 @@ PAGES = [
               tip="Type any number of days. Set it to 0 to never forget."),
             S("after_playback", "When a file ends", "next",
               [("next", "Play the next file in the folder"), ("next_loop", "Play the next file (start over after the last)"),
-               ("nothing", "Do nothing"), ("close", "Close the file"), ("exit", "Exit Iron Will")]),
+               ("nothing", "Do nothing"), ("rewind", "Go back to the start and pause"), ("close", "Close the file"),
+               ("close_minimize", "Close the file and minimize"), ("exit", "Exit Iron Will")]),
             S("remember_volume", "Remember the volume between sessions", True),
+            S("remember_mute", "Remember mute between sessions", False),
+            S("history_max", "Remember where I left off in up to", 500, lo=10, hi=5000, step=10, suffix=" files"),
+            S("fav_position", "Favorites reopen at the saved time", True),
             S("remember_tracks", "Remember the audio and subtitle tracks I pick for each file", True,
               tip="MPC-BE: Player > Remember selected audio and subtitle tracks"),
             S("recent_count", "Recent files to remember", 20, lo=0, hi=100, zero_text="Don't keep a history",
@@ -82,6 +86,8 @@ PAGES = [
             S("allow_multiple", "Allow multiple Iron Will windows (each video opens in its own window)", True,
               tip="Checked: every video you open gets its own window. Unchecked: new videos play in the window "
                   "that's already open. Takes effect the next time Iron Will starts."),
+            S("next_on_error", "If a file won't open, skip to the next one in the folder", True),
+            S("paste_url", "Open URL fills in a link from the clipboard", True),
             S("keep_speed", "Keep the playback speed when the next file opens", False,
               tip="Off: every file starts at normal speed (MPC-BE's default)"),
             S("auto_fit", "When a video opens, resize the window", "off",
@@ -110,10 +116,17 @@ PAGES = [
             S("show_menubar", "Show the menu bar (File, View, Play, Navigate, Favorites, Help)", False),
             S("toast", "Show on-screen messages (volume, speed…)", True),
         ]),
+        ("Seek bar", [
+            S("seek_tooltip", "Show the time while hovering over the seek bar", True),
+            S("seek_preview", "Show a picture preview while hovering over the seek bar", False,
+              tip="MPC-BE: Smart seek. Uses FFmpeg to grab the frame under the mouse."),
+            S("seek_preview_size", "Preview width", 240, lo=120, hi=480, step=20, suffix=" px"),
+        ]),
         ("Time display", [
             S("time_right", "The time on the right shows", "remaining",
               [("remaining", "Time remaining"), ("total", "Total length")]),
             S("show_ms", "Show milliseconds", False),
+            S("show_zero_hours", "Show hours even under an hour (0:05:12 instead of 5:12)", True),
             S("chapter_marks", "Show chapter marks on the seek bar", True),
         ]),
         ("On-screen messages", [
@@ -121,6 +134,8 @@ PAGES = [
             S("osd_size", "Size", 16, lo=8, hi=48, suffix=" pt"),
             S("osd_color", "Text color", "#FFFFFF", kind="color"),
             S("osd_filename", "Show the file name when a file opens", False),
+            S("osd_opacity", "Message background opacity", 80, lo=0, hi=100, step=5, suffix=" %"),
+            S("osd_clock", "Show the clock in full screen", False),
         ]),
     ]),
     Page("keys", "Keys", "player", special="keys",
@@ -144,9 +159,16 @@ PAGES = [
               [("never", "Never"), ("always", "Always"), ("playing", "While playing")]),
             S("borderless", "Borderless window (no title bar or frame)", False,
               tip="Drag the video to move it, drag its edges to resize. Ctrl+B or the title-bar menu toggles it."),
+            S("startup_size", "Window size when Iron Will starts", "remember",
+              [("remember", "Same as last time"), ("specified", "This size")]),
+            S("startup_w", "Width", 1280, lo=320, hi=7680, step=10, suffix=" px"),
+            S("startup_h", "Height", 760, lo=200, hi=4320, step=10, suffix=" px"),
+            S("reset_after_close", "Go back to the startup size after closing a file", False),
             S("snap_edges", "Snap to screen edges when moving the window", False),
             S("limit_proportions", "Keep the window's shape matching the video when resizing", False),
             S("pause_minimized", "Pause when minimized", False),
+            S("hide_cursor_window", "Hide the mouse pointer with the controls in a window too (not just full screen)",
+              True),
             S("tray_icon", "Show an icon in the notification area (minimizing hides to it)", False),
         ]),
         ("Transparency", [
@@ -163,7 +185,9 @@ PAGES = [
     Page("playback", "Playback", groups=[
         ("Playback", [
             S("volume_max", "Maximum volume (boost)", 150, mpv="volume-max", lo=100, hi=300, step=10, suffix=" %"),
-            S("loop_file", "Repeat", "no", [("no", "Off"), ("inf", "Repeat this file forever")], mpv="loop-file"),
+            S("loop_file", "Repeat", "no", [("no", "Off"), ("inf", "Repeat this file forever"), ("1", "Play twice"),
+                                             ("2", "Play 3 times"), ("4", "Play 5 times"), ("9", "Play 10 times")],
+              mpv="loop-file"),
             S("pitch", "Keep voices natural when speeding up", True, mpv="audio-pitch-correction", to_mpv=YES_NO),
             S("speed_step", "Increase / Decrease Rate step", 5, lo=1, hi=50, suffix=" %",
               tip="How much each speed up / slow down changes the speed (MPC-BE: Options > Playback > Speed step)"),
@@ -174,7 +198,7 @@ PAGES = [
                ("name_desc", "Name, Z to A"), ("modified_new", "Date modified, newest first"),
                ("modified_old", "Date modified, oldest first"), ("created_new", "Date created, newest first"),
                ("created_old", "Date created, oldest first"), ("size_small", "Size, smallest first"),
-               ("size_large", "Size, largest first")],
+               ("size_large", "Size, largest first"), ("shuffle", "Shuffle (random order)")],
               tip="'Same as File Explorer' reads the sort of the folder's Explorer window when it's open and "
                   "remembers it for when it isn't"),
             S("folder_order_default", "For folders Explorer hasn't shown yet", "name",
@@ -229,6 +253,19 @@ PAGES = [
             S("unscaled", "Scaling", "no", [("no", "Fit to window"), ("downscale-big", "Only shrink, never enlarge"),
                                             ("yes", "Original pixel size")], mpv="video-unscaled"),
             S("panscan", "Crop to fill wide screens (pan & scan)", 0.0, mpv="panscan", lo=0, hi=1, step=0.05),
+            S("aspect_override", "Aspect ratio", "no",
+              [("no", "From the file"), ("4:3", "4:3"), ("16:9", "16:9"), ("1.85:1", "1.85:1"), ("2.35:1", "2.35:1"),
+               ("2.39:1", "2.39:1"), ("21:9", "21:9")], mpv="video-aspect-override",
+              tip="MPC-BE: Playback > aspect ratio override. Use it for files with wrong aspect information."),
+            S("monitor_aspect", "Monitor pixel aspect (1 = square pixels)", 1.0, mpv="monitorpixelaspect", lo=0.5, hi=2,
+              step=0.01, tip="MPC-BE: compensate for a monitor whose pixels aren't square"),
+            S("stereo3d", "3D video", "off",
+              [("off", "Show as is"), ("sbsl", "Side-by-side: left eye only"), ("abl", "Top-bottom: top eye only"),
+               ("sbs_anaglyph", "Side-by-side to red/cyan anaglyph"), ("ab_anaglyph", "Top-bottom to red/cyan anaglyph")]),
+            S("audio_display", "When playing audio only, show", "embedded-first",
+              [("embedded-first", "The album art in the file, else cover.jpg"),
+               ("external-first", "cover.jpg in the folder, else the album art"), ("no", "Nothing")],
+              mpv="audio-display"),
         ]),
     ]),
     Page("quality", "Quality & Scaling", "video", groups=[
@@ -266,6 +303,11 @@ PAGES = [
             S("tone_mapping", "Tone mapping", "auto",
               [("auto", "Auto"), ("bt.2390", "BT.2390"), ("spline", "Spline"), ("hable", "Hable (filmic)"),
                ("mobius", "Mobius"), ("reinhard", "Reinhard"), ("clip", "Clip")], mpv="tone-mapping"),
+            S("icc_auto", "Use the monitor's color profile (color management)", False, mpv="icc-profile-auto",
+              to_mpv=YES_NO),
+            S("output_levels", "Output levels", "auto",
+              [("auto", "Auto"), ("full", "Full range (0-255, PC)"), ("limited", "Limited range (16-235, TV)")],
+              mpv="video-output-levels"),
             S("hdr_peak", "Measure HDR brightness per scene", "auto", [("auto", "Auto"), ("yes", "On"), ("no", "Off")],
               mpv="hdr-compute-peak"),
         ]),
@@ -294,6 +336,7 @@ PAGES = [
               [("current", "The monitor the window is on"), ("primary", "The primary monitor"),
                ("1", "Monitor 1"), ("2", "Monitor 2"), ("3", "Monitor 3")]),
             S("exit_fs_focus", "Leave full screen when Iron Will loses focus", False),
+            S("fs_controls", "Show the controls in full screen when the mouse moves", True),
         ]),
     ]),
     Page("audio", "Audio", groups=[
@@ -309,6 +352,7 @@ PAGES = [
                ("ac3,dts,eac3,truehd,dts-hd", "+ TrueHD and DTS-HD")], mpv="audio-spdif"),
         ]),
         ("Tracks", [
+            S("prefer_external_audio", "Prefer audio files over the audio inside the video", False),
             S("audio_lang", "Preferred audio language", "en", LANG_CHOICES, mpv="alang",
               to_mpv=lambda v: LANGUAGES.get(v, ("", ""))[0],
               tip="Every file starts in this language when it has a track for it"),
@@ -329,6 +373,9 @@ PAGES = [
             S("downmix_norm", "Normalize volume when downmixing surround to stereo", False,
               mpv="audio-normalize-downmix", to_mpv=YES_NO),
             S("balance", "Balance (left - / right +)", 0, lo=-100, hi=100, step=5),
+            S("gain", "Gain (extra loudness)", 0.0, lo=0, hi=20, step=0.5, suffix=" dB"),
+            S("norm_strength", "Normalize: target level", 75, lo=10, hi=100, step=5, suffix=" %",
+              tip="How loud the normalized sound aims to be (MPC-BE: Normalize level)"),
         ]),
     ]),
     Page("subtitles", "Subtitles", groups=[
@@ -345,6 +392,17 @@ PAGES = [
             S("sub_paths", "Also look for subtitles in these subfolders", "subs;subtitles", kind="text",
               mpv="sub-file-paths", to_mpv=lambda v: [x.strip() for x in v.replace(",", ";").split(";") if x.strip()],
               tip="Separate folders with ;"),
+            S("prefer_external_subs", "Prefer subtitle files over subtitles inside the video", True),
+            S("ignore_embedded_subs", "Ignore subtitles inside the video", False),
+            S("forced_subs", "Show only forced subtitles (signs and foreign speech)", False,
+              mpv="sub-forced-events-only", to_mpv=YES_NO),
+            S("sub_reload", "Reload a subtitle file when it changes on disk", False),
+            S("sub_codepage", "Text encoding for subtitle files", "auto",
+              [("auto", "Detect automatically"), ("utf-8", "Unicode (UTF-8)"), ("cp1252", "Western (Windows-1252)"),
+               ("cp1251", "Cyrillic (Windows-1251)"), ("cp1250", "Central European (Windows-1250)"),
+               ("cp1253", "Greek (Windows-1253)"), ("cp1254", "Turkish (Windows-1254)"), ("cp1256", "Arabic (Windows-1256)"),
+               ("cp932", "Japanese (Shift-JIS)"), ("cp936", "Chinese Simplified (GBK)"),
+               ("cp950", "Chinese Traditional (Big5)"), ("cp949", "Korean")], mpv="sub-codepage"),
             S("sub_delay_step", "Subtitle delay step (F1 / F2)", 500, lo=10, hi=5000, step=10, suffix=" ms"),
         ]),
     ]),
@@ -402,6 +460,9 @@ PAGES = [
     Page("misc", "Miscellaneous", special="about", groups=[
         ("Advanced", [
             S("custom_opts", "Extra mpv options (one per line: name=value)", "", kind="multiline"),
+            S("network_timeout", "Network timeout", 60, mpv="network-timeout", lo=5, hi=600, suffix=" s"),
+            S("user_agent", "Network user agent", "", mpv="user-agent", kind="text",
+              tip="Leave empty for mpv's default"),
             S("log_file", "Write a debug log file", False),
             S("priority", "Process priority", "normal",
               [("normal", "Normal"), ("above", "Above normal"), ("high", "High"), ("below", "Below normal")]),
@@ -475,7 +536,10 @@ class Config:
 def _audio_filter_chain(v):
     chain = []
     if v.get("normalize"):
-        chain.append("lavfi=[dynaudnorm=f=250:g=31:p=0.9]")
+        peak = max(0.1, min(1.0, v.get("norm_strength", 75) / 100 + 0.15))
+        chain.append(f"lavfi=[dynaudnorm=f=250:g=31:p={peak:.2f}]")
+    if v.get("gain"):
+        chain.append(f"lavfi=[volume={float(v['gain']):g}dB]")
     if v.get("night_mode"):
         chain.append("lavfi=[acompressor=threshold=0.08:ratio=6:attack=20:release=250:makeup=2]")
     if v.get("balance"):
@@ -500,11 +564,20 @@ def apply_to_mpv(player, values, only=None):
             player[name] = value
         except Exception as exc:  # mpv rejects unknown values or options it can't change while playing
             failed.append((s.label, str(exc).split("\n")[0][:120]))
-    if only is None or {"normalize", "night_mode", "balance"} & set(only):
+    if only is None or {"normalize", "night_mode", "balance", "gain", "norm_strength"} & set(only):
         try:
             player["af"] = _audio_filter_chain(values)
         except Exception as exc:
             failed.append(("Sound processing", str(exc)[:120]))
+    if only is None or "stereo3d" in only:
+        modes = {"sbsl": "sbsl:ml", "abl": "abl:ml", "sbs_anaglyph": "sbsl:arcd", "ab_anaglyph": "abl:arcd"}
+        try:
+            mode = modes.get(values.get("stereo3d", "off"))
+            player.command("vf", "remove", "@stereo")
+            if mode:
+                player.command("vf", "add", f"@stereo:lavfi=[stereo3d={mode}]")
+        except Exception as exc:
+            failed.append(("3D video", str(exc)[:120]))
     if only is None or {"shaders", "shaders_on"} & set(only):
         try:
             player.command("change-list", "glsl-shaders", "clr", "")

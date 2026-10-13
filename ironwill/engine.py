@@ -23,7 +23,8 @@ class PlayerEngine(QObject):
     end_reached = Signal()
     tracks_changed = Signal(list)
     speed_changed = Signal(float)
-    track_picked = Signal(str, object)  # kind, id (None = off): only for choices the user made
+    track_picked = Signal(str, object)
+    load_failed = Signal(str)  # kind, id (None = off): only for choices the user made
     def __init__(self, parent=None):
         super().__init__(parent)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,16 @@ class PlayerEngine(QObject):
             self.mpv.observe_property(name, lambda _n, v, fn=fn: fn(v))
 
         self._want_pause = False
+
+        @self.mpv.event_callback("end-file")
+        def _ended(event):
+            try:
+                reason = event.as_dict().get("reason", b"")
+                reason = reason.decode() if isinstance(reason, bytes) else str(reason)
+            except Exception:
+                reason = ""
+            if reason == "error":
+                self.load_failed.emit(self.path)
 
         @self.mpv.event_callback("file-loaded")
         def _loaded(_event):

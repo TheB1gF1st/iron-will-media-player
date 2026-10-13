@@ -39,10 +39,16 @@ def ui_font(size, weight=QFont.Weight.Normal):
     return f
 
 
+ZERO_HOURS = True  # Options > Interface > Show hours even under an hour
+
+
 def fmt_time(seconds, ms=False):
     seconds = max(0.0, float(seconds))
     s = int(seconds)
-    text = f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+    if s < 3600 and not ZERO_HOURS:
+        text = f"{s // 60}:{s % 60:02d}"
+    else:
+        text = f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
     return f"{text}.{int((seconds - s) * 1000):03d}" if ms else text
 
 
@@ -127,6 +133,8 @@ class SeekBar(QWidget):
     loop_clear_requested = Signal()
     loop_hint = Signal()
     loop_moved = Signal(float, float)  # new A, B in seconds (-1 = not set) while a tick is dragged
+    hover_changed = Signal(float, float)  # seconds under the mouse, x in this widget (-1 = mouse left)
+    show_time = True
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -202,6 +210,8 @@ class SeekBar(QWidget):
 
     def mouseMoveEvent(self, e):
         self.hover_x = e.position().x()
+        if self.duration > 0:
+            self.hover_changed.emit(self._value_at(self.hover_x), self.hover_x)
         d = self.marker_drag
         if d:
             dx = self.hover_x - d["x"]
@@ -249,6 +259,7 @@ class SeekBar(QWidget):
 
     def leaveEvent(self, _e):
         self.hover_x = None
+        self.hover_changed.emit(-1.0, -1.0)
         self.update()
 
     def paintEvent(self, _e):
@@ -297,7 +308,7 @@ class SeekBar(QWidget):
         p.setPen(QPen(ACCENT, 2.5))
         p.drawEllipse(QPointF(px, y), r, r)
         # Time bubble above the cursor while hovering.
-        if self.hover_x is not None and self.duration > 0:
+        if self.hover_x is not None and self.duration > 0 and self.show_time:
             label = fmt_time(self._value_at(self.hover_x))
             p.setFont(ui_font(12, QFont.Weight.DemiBold))
             w = QFontMetrics(p.font()).horizontalAdvance(label) + 16
@@ -543,9 +554,10 @@ class Toast(QLabel):
 
     enabled = True
 
-    def set_style(self, family, size, color):
+    def set_style(self, family, size, color, bg_opacity=80):
         self.setFont(QFont(family, int(size), QFont.Weight.DemiBold))
-        self.setStyleSheet(f"color: {color}; background: rgba(20,20,20,200); border-radius: 10px; padding: 8px 18px;")
+        alpha = int(255 * max(0, min(100, bg_opacity)) / 100)
+        self.setStyleSheet(f"color: {color}; background: rgba(20,20,20,{alpha}); border-radius: 10px; padding: 8px 18px;")
 
     def show_message(self, text):
         if not self.enabled:

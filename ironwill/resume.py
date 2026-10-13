@@ -17,6 +17,7 @@ class ResumeStore:
         except (OSError, ValueError):
             self.data = {}
         self.last_write = 0.0
+        self.max_entries = MAX_ENTRIES
 
     @staticmethod
     def _key(path):
@@ -48,8 +49,8 @@ class ResumeStore:
             self.save()
 
     def save(self):
-        if len(self.data) > MAX_ENTRIES:  # keep the most recently watched
-            keep = sorted(self.data.items(), key=lambda kv: kv[1].get("t", 0), reverse=True)[:MAX_ENTRIES]
+        if len(self.data) > self.max_entries:  # keep the most recently watched
+            keep = sorted(self.data.items(), key=lambda kv: kv[1].get("t", 0), reverse=True)[:self.max_entries]
             self.data = dict(keep)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = STORE.with_suffix(".tmp")
