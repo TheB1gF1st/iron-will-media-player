@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
 
         self.cfg = Config()
         self.tray, self.paused_by_minimize = None, False
+        self.opacity = int(self.cfg["opacity"])  # this window's transparency (View > Transparency), in percent
         self.engine = PlayerEngine(self)
         failed = apply_to_mpv(self.engine.mpv, self.cfg.values)
         for label, err in failed:
@@ -411,6 +412,11 @@ class MainWindow(QMainWindow):
         act("zoom_200", "Window size 200%", ["Alt+3"], lambda: self.fit_to_video(2.0))
         act("zoom_auto", "Window size: auto fit", ["Alt+4"], lambda: self.fit_to_video(None))
         act("seek_back_small", "Small jump back", ["Ctrl+Left"], lambda: self.engine.skip(-self.cfg["small_step"]))
+        act("opacity_up", "More solid", ["Ctrl+Shift+Up"], lambda: self.set_opacity(self.opacity + 10))
+        act("opacity_down", "More transparent", ["Ctrl+Shift+Down"], lambda: self.set_opacity(self.opacity - 10))
+        for n in range(10):  # Glass2K's hotkeys: Ctrl+Shift+1 = 10% ... Ctrl+Shift+9 = 90%, Ctrl+Shift+0 = solid
+            pct = n * 10 or 100
+            act(f"opacity_{pct}", f"Transparency {pct}%", [f"Ctrl+Shift+{n}"], lambda _c=False, p=pct: self.set_opacity(p))
         act("seek_fwd_small", "Small jump forward", ["Ctrl+Right"], lambda: self.engine.skip(self.cfg["small_step"]))
         act("sub_delay_down", "Subtitle delay -", ["F1"],
             lambda: self.nudge_delay("sub-delay", -self.cfg["sub_delay_step"] / 1000, "Subtitle delay"))
@@ -550,6 +556,10 @@ class MainWindow(QMainWindow):
             self.settings.setValue("recent", [])
         self._sync_tray()
         self._set_priority()
+        if c["opacity"] != getattr(self, "applied_opacity", c["opacity"]):  # Options changed the default
+            self.set_opacity(c["opacity"], announce=False)
+        self.applied_opacity = c["opacity"]
+        self.setWindowOpacity(1.0 if c["opacity_hover_solid"] and self.underMouse() else self.opacity / 100)
         if c["video_frame"] != getattr(self, "applied_frame", c["video_frame"]):
             # Options changed the default video frame: push the matching scaling options (only on a change, so the
             # separate Keep Aspect Ratio checkbox still works on its own)
@@ -620,6 +630,24 @@ class MainWindow(QMainWindow):
         elif p.y() >= h - m:
             edges |= Qt.Edge.BottomEdge
         return edges
+
+    def set_opacity(self, pct, announce=True):
+        """Glass2K-style transparency for this window only (Options sets the starting value for new windows)."""
+        self.opacity = max(10, min(100, int(pct)))
+        if not (self.cfg["opacity_hover_solid"] and self.underMouse()):
+            self.setWindowOpacity(self.opacity / 100)
+        if announce:
+            self.toast.show_message("Solid" if self.opacity == 100 else f"Transparency {self.opacity}%")
+
+    def enterEvent(self, e):
+        super().enterEvent(e)
+        if self.cfg["opacity_hover_solid"] and self.opacity < 100:
+            self.setWindowOpacity(1.0)
+
+    def leaveEvent(self, e):
+        super().leaveEvent(e)
+        if self.cfg["opacity_hover_solid"] and self.opacity < 100:
+            self.setWindowOpacity(self.opacity / 100)
 
     def _sync_tray(self):
         if self.cfg["tray_icon"] and getattr(self, "tray", None) is None:

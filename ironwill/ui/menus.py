@@ -253,6 +253,10 @@ def sections(win):
             Item("Always", lambda: win.set_prefs({"on_top": "always"}), checked=on_top == "always"),
             Item("While Playing", lambda: win.set_prefs({"on_top": "playing"}), checked=on_top == "playing"),
         ]),
+        Item("Transparency", children=[
+            Item("Solid (100%)" if pct == 100 else f"{pct}%", lambda p=pct: win.set_opacity(p),
+                 checked=win.opacity == pct)
+            for pct in (100, 90, 80, 70, 60, 50, 40, 30, 20)]),
         SEP,
         Item("Hide Menu", lambda: win.set_prefs({"show_menubar": not cfg["show_menubar"]}), keys("menubar"),
              checked=not cfg["show_menubar"]),

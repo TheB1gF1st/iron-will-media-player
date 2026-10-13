@@ -149,6 +149,12 @@ PAGES = [
             S("pause_minimized", "Pause when minimized", False),
             S("tray_icon", "Show an icon in the notification area (minimizing hides to it)", False),
         ]),
+        ("Transparency", [
+            S("opacity", "Window transparency for new windows", 100, lo=10, hi=100, step=5, suffix=" %",
+              tip="100% = solid. Change it per window from View > Transparency or Ctrl+Shift+Up / Down "
+                  "(Ctrl+Shift+1 to 0 jump straight to 10% to 100%, like Glass2K)."),
+            S("opacity_hover_solid", "Turn solid while the mouse is over the window", False),
+        ]),
         ("Mini view", [
             S("mini_size", "Mini view size", "medium",
               [("small", "Small (400 × 225)"), ("medium", "Medium (560 × 315)"), ("large", "Large (720 × 405)")]),
