@@ -355,6 +355,7 @@ class MainWindow(QMainWindow):
         e.track_picked.connect(self._save_tracks)
         e.load_failed.connect(self._on_load_failed)
         self.bar.seek.hover_changed.connect(self._seek_hover)
+        self.bar.seek.menu_requested.connect(self._seek_menu)
 
         b.seek.seek_requested.connect(lambda s, exact: e.seek(s, exact))
         b.seek.loop_clear_requested.connect(self._clear_loop_from_timeline)
@@ -686,6 +687,65 @@ class MainWindow(QMainWindow):
         self._set_title(url.rsplit("/", 1)[-1] or url)
         self._set_loaded(True)
         self.show_chrome()
+
+    def _seek_menu(self, pos):
+        if not self.engine.path:
+            return
+        has_loop = self.loop["a"] is not None or self.loop["b"] is not None
+        m = dark_menu(self, "A-B")
+        m.addAction("Mark A here", lambda: self.run_command("ab_a"))
+        m.addAction("Mark B here", lambda: self.run_command("ab_b"))
+        if has_loop:
+            m.addSeparator()
+            m.addAction("Save A-B Clip (fast, exact copy)", lambda: self.save_loop_clip(precise=False))
+            m.addAction("Save A-B Clip (frame-accurate, re-encode)", lambda: self.save_loop_clip(precise=True))
+            m.addSeparator()
+            m.addAction("Clear A-B Loop", lambda: self.run_command("ab_clear"))
+        m.exec(pos)
+
+    def save_loop_clip(self, precise=False):
+        """Write the A-B section to its own file with FFmpeg. Fast = stream copy (instant, no quality loss, but starts
+        on the keyframe at or before A); frame-accurate = re-encode (exact start, takes longer)."""
+        from PySide6.QtCore import QProcess
+        from ..dupes.fingerprint import find_tool
+        src = self.engine.path
+        if not src or "://" in src:
+            return
+        a = self.loop["a"] if self.loop["a"] is not None else 0.0
+        b = self.loop["b"] if self.loop["b"] is not None else self.duration
+        if b <= a:
+            self.toast.show_message("Set A before B first")
+            return
+        ffmpeg = find_tool("ffmpeg")
+        if not ffmpeg:
+            self.toast.show_message("FFmpeg wasn't found")
+            return
+        stamp = lambda t: fmt_time(t).replace(":", ".")
+        ext = ".mp4" if precise else Path(src).suffix
+        default = Path(src).with_name(f"{Path(src).stem} clip {stamp(a)} - {stamp(b)}{ext}")
+        out, _ = QFileDialog.getSaveFileName(self, "Save A-B Clip", str(default),
+                                             "Video (*.mp4)" if precise else f"Video (*{ext})")
+        if not out:
+            return
+        if precise:
+            args = ["-y", "-v", "error", "-ss", f"{a:.3f}", "-i", src, "-t", f"{b - a:.3f}", "-map", "0:v:0", "-map", "0:a?",
+                    "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                    "-b:a", "192k", "-movflags", "+faststart", out]
+        else:
+            args = ["-y", "-v", "error", "-ss", f"{a:.3f}", "-i", src, "-t", f"{b - a:.3f}", "-map", "0", "-c", "copy",
+                    "-avoid_negative_ts", "make_zero", out]
+        proc = QProcess(self)
+        self.clip_procs = getattr(self, "clip_procs", []) + [proc]
+
+        def done(code, _status):
+            self.clip_procs.remove(proc)
+            ok = code == 0 and Path(out).exists()
+            self.toast.show_message(f"Clip saved: {Path(out).name}" if ok else "Couldn't save the clip")
+            if not ok:
+                log("clip failed:", bytes(proc.readAllStandardError()).decode(errors="replace")[:500])
+        proc.finished.connect(done)
+        proc.start(ffmpeg, args)
+        self.toast.show_message("Saving clip…" if not precise else "Saving clip (re-encoding, this can take a moment)…")
 
     def _on_load_failed(self, path):
         self.toast.show_message(f"Couldn't open {Path(path).name}")

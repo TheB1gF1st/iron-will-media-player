@@ -2,7 +2,7 @@
 dark menus and the on-screen toast."""
 import time
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen, QFontMetrics
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu,
                                QPushButton, QSlider, QVBoxLayout, QWidget)
@@ -134,6 +134,7 @@ class SeekBar(QWidget):
     loop_hint = Signal()
     loop_moved = Signal(float, float)  # new A, B in seconds (-1 = not set) while a tick is dragged
     hover_changed = Signal(float, float)  # seconds under the mouse, x in this widget (-1 = mouse left)
+    menu_requested = Signal(QPoint)  # right-click on the seek bar (global position)
     show_time = True
 
     def __init__(self, parent=None):
@@ -183,6 +184,9 @@ class SeekBar(QWidget):
                 if abs(mx - x) <= 7 and (best is None or abs(mx - x) < best[1]):
                     best = (which, abs(mx - x))
         return best[0] if best else None
+
+    def contextMenuEvent(self, e):
+        self.menu_requested.emit(e.globalPos())
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton and self.duration > 0:

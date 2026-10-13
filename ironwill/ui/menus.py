@@ -104,6 +104,10 @@ def sections(win):
         Item("A-B (Reset)", lambda: run("ab_clear"), enabled=win.loop["a"] is not None or win.loop["b"] is not None),
         Item("A-B (Mark A)", lambda: run("ab_a"), checked=win.loop["a"] is not None, enabled=loaded),
         Item("A-B (Mark B)", lambda: run("ab_b"), checked=win.loop["b"] is not None, enabled=loaded),
+        Item("Save A-B Clip (fast, exact copy)", lambda: win.save_loop_clip(precise=False),
+             enabled=loaded and (win.loop["a"] is not None or win.loop["b"] is not None)),
+        Item("Save A-B Clip (frame-accurate, re-encode)", lambda: win.save_loop_clip(precise=True),
+             enabled=loaded and (win.loop["a"] is not None or win.loop["b"] is not None)),
     ]
     zoom = [
         Item("50%", lambda: win.fit_to_video(0.5), keys("zoom_50"), enabled=loaded),
