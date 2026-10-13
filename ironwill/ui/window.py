@@ -156,7 +156,6 @@ class Welcome(QWidget):
         lay.addStretch(1)
         # "I will" brush script from the Iron Will Fitness logo, scaled to the window in resizeEvent.
         self.logo_src = QPixmap(str(ASSETS / "i-will.png"))
-        self.default_logo = self.logo_src
         self.logo = QLabel()
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -185,14 +184,8 @@ class Welcome(QWidget):
         lay.addWidget(hint, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch(1)
 
-    def set_logo(self, path):
-        pm = QPixmap(path) if path else QPixmap()
-        self.logo_src = pm if not pm.isNull() else self.default_logo
-        self.resizeEvent(None)
-
     def resizeEvent(self, e):
-        if e is not None:
-            super().resizeEvent(e)
+        super().resizeEvent(e)
         width = int(min(560, max(220, self.width() * 0.42, 0)))
         width = min(width, int(self.height() * 1.0))
         ratio = self.devicePixelRatioF()
@@ -584,13 +577,12 @@ class MainWindow(QMainWindow):
         self.bar.back.setToolTip(f"Back {c['skip_back']} seconds")
         self.bar.fwd.setToolTip(f"Forward {c['skip_fwd']} seconds")
         self.toast.enabled = c["toast"]
-        self.toast.set_style(c["osd_font"], c["osd_size"], c["osd_color"] or "#FFFFFF", c["osd_opacity"])
+        self.toast.set_style("Segoe UI", c["osd_size"], "#FFFFFF")  # only the size is adjustable: the look stays
         from . import widgets as _w
         _w.ZERO_HOURS = bool(c["show_zero_hours"])
         self.bar.seek.show_time = bool(c["seek_tooltip"])
         self.resume.max_entries = int(c["history_max"])
         self._update_clock()
-        self.welcome.set_logo(c["logo_file"])
         self._register_media_keys(bool(c["global_media_keys"]))
         if not c["taskbar"]:
             self._taskbar_progress(None)
@@ -826,7 +818,7 @@ class MainWindow(QMainWindow):
             self.clock = QLabel(self.stage)
             self.clock.setStyleSheet("color: rgba(255,255,255,220); background: rgba(20,20,20,150); "
                                      "border-radius: 8px; padding: 4px 12px;")
-            self.clock.setFont(QFont(self.cfg["osd_font"], 14, QFont.Weight.DemiBold))
+            self.clock.setFont(ui_font(14, QFont.Weight.DemiBold))
             self.clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self.clock_timer = QTimer(self, interval=5000)
             self.clock_timer.timeout.connect(self._update_clock)

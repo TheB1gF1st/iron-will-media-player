@@ -171,9 +171,104 @@ def read(path):
         put("audio_paths", folders(s["AudioPaths"]), f"Audio folders: {folders(s['AudioPaths'])}")
     if a.get("Balance", "").lstrip("-").isdigit() and int(a["Balance"]):
         put("balance", int(a["Balance"]), f"Balance: {a['Balance']}")
+    def flag(ini, ours, label, section=s, invert=False):
+        if ini in section:
+            on = (section[ini] == "1") != invert
+            put(ours, on, f"{label}: {'on' if on else 'off'}")
+
+    # After playback (MPC-BE keeps these as separate switches; the last one that's set wins)
+    after = None
+    if s.get("SearchInDirAfterPlayBack") == "1":
+        after = "next_loop" if s.get("SearchInDirAfterPlayBackLooped") == "1" else "next"
+    for ini, ours in (("Rewind", "rewind"), ("CloseFileAfterPlayBack", "close"),
+                      ("CloseFileAfterPlayBackAndMinimize", "close_minimize"), ("ExitAfterPlayBack", "exit")):
+        if s.get(ini) == "1":
+            after = ours
+    if after:
+        put("after_playback", after, f"When a file ends: {after}")
+    if s.get("Loop") == "1" and s.get("LoopNum", "").isdigit():
+        n = int(s["LoopNum"])
+        repeat = {2: "1", 3: "2", 5: "4", 10: "9"}.get(n, "inf")
+        put("loop_file", repeat, f"Repeat: {'forever' if repeat == 'inf' else f'{n} times'}")
+    if s.get("MultipleInstances", "").isdigit():
+        put("allow_multiple", s["MultipleInstances"] != "1", "Multiple windows: "
+            + ("no (same player)" if s["MultipleInstances"] == "1" else "yes"))
+    if "FastSeek" in s:
+        put("hr_seek", "no" if s["FastSeek"] == "1" else "default", "Seeking: "
+            + ("fast (keyframes)" if s["FastSeek"] == "1" else "precise"))
+    if s.get("RememberFilePos") == "0":
+        put("resume", "never", "Remember position: off")
+    flag("RememberWindowPos", "remember_geometry", "Remember window position")
+    flag("ForcedSubtitles", "forced_subs", "Forced subtitles only")
+    flag("DisableInternalSubtitles", "ignore_embedded_subs", "Ignore embedded subtitles")
+    flag("PrioritizeExternalSubtitles", "prefer_external_subs", "Prefer subtitle files")
+    flag("PrioritizeExternalAudio", "prefer_external_audio", "Prefer audio files")
+    flag("AutoReloadExtSubtitles", "sub_reload", "Reload changed subtitle files")
+    flag("FavRememberPos", "fav_position", "Favorites remember the time")
+    flag("PasteClipboardURL", "paste_url", "Open URL uses the clipboard")
+    flag("UseTimeTooltip", "seek_tooltip", "Seek bar time tooltip")
+    flag("UseSmartSeek", "seek_preview", "Seek bar picture preview")
+    flag("ShowZeroHours", "show_zero_hours", "Show zero hours")
+    flag("ResetWindowAfterClosingFile", "reset_after_close", "Reset window after closing a file")
+    flag("HideWindowedMousePointer", "hide_cursor_window", "Hide the pointer in a window")
+    flag("FullScreenCtrls", "fs_controls", "Controls in full screen")
+    flag("UseWin7TaskBar", "taskbar", "Taskbar progress and buttons")
+    flag("UseGlobalMedia", "global_media_keys", "Global media keys")
+    cp_code = s.get("SubtitleDefaultCodePage", "")
+    if s.get("SubtitleAutoDetectCodePage") == "1" or cp_code in ("", "0"):
+        put("sub_codepage", "auto", "Subtitle encoding: automatic")
+    elif cp_code in ("1250", "1251", "1252", "1253", "1254", "1256", "932", "936", "950", "949", "65001"):
+        put("sub_codepage", "utf-8" if cp_code == "65001" else f"cp{cp_code}", f"Subtitle encoding: code page {cp_code}")
+    ax, ay = s.get("AspectRatioX", "0"), s.get("AspectRatioY", "0")
+    if ax.isdigit() and ay.isdigit() and int(ax) and int(ay):
+        ratio = f"{int(ax)}:{int(ay)}"
+        known = {"4:3": "4:3", "16:9": "16:9", "185:100": "1.85:1", "235:100": "2.35:1", "239:100": "2.39:1",
+                 "21:9": "21:9"}
+        if ratio in known:
+            put("aspect_override", known[ratio], f"Aspect ratio override: {known[ratio]}")
+    stereo = {"0": "off", "1": "off", "2": "sbsl", "3": "abl"}.get(s.get("Stereo3DMode", "0"))
+    if stereo and stereo != "off":
+        put("stereo3d", stereo, f"3D video: {stereo}")
+    if s.get("AudioWindowMode") in ("0", "2"):
+        put("audio_display", "no" if s["AudioWindowMode"] == "0" else "embedded-first", "Audio-only display")
+    if s.get("HistoryEntriesMax", "").isdigit():
+        put("history_max", max(10, int(s["HistoryEntriesMax"])), f"Position history: {s['HistoryEntriesMax']} files")
+    if s.get("NetworkTimeout", "").isdigit():
+        put("network_timeout", int(s["NetworkTimeout"]), f"Network timeout: {s['NetworkTimeout']} s")
+    if s.get("UserAgent") and s["UserAgent"] != "Mozilla/5.0":
+        put("user_agent", s["UserAgent"], "Network user agent")
+    if s.get("WindowModeStartup") == "1" and ";" in s.get("SpecifiedWindowSize", ""):
+        w_, h_ = s["SpecifiedWindowSize"].split(";")[:2]
+        if w_.isdigit() and h_.isdigit():
+            put("startup_size", "specified", f"Startup window size: {w_} x {h_}")
+            put("startup_w", int(w_), "")
+            put("startup_h", int(h_), "")
+    for ini, ours in (("ThumbCols", "thumb_cols"), ("ThumbRows", "thumb_rows"), ("ThumbWidth", "thumb_width")):
+        if s.get(ini, "").isdigit():
+            put(ours, int(s[ini]), f"Thumbnail sheet {ours.split('_')[1]}: {s[ini]}")
+    if s.get("SnapShotPath"):
+        put("shot_dir", s["SnapShotPath"].rstrip("\\"), f"Screenshot folder: {s['SnapShotPath']}")
+    fs_res = cp["Settings\\FullscreenRes"] if cp.has_section("Settings\\FullscreenRes") else {}
+    if fs_res.get("Enable") == "1" and fs_res.get("ApplyDefault") == "1":
+        put("fs_refresh", True, "Match refresh rate in full screen: on")
+    video = cp["Video"] if cp.has_section("Video") else {}
+    flag("ColorManagement", "icc_auto", "Color management", section=video)
+    if video.get("EVROutputRange") in ("0", "1"):
+        put("output_levels", "full" if video["EVROutputRange"] == "0" else "limited", "Output levels")
+    if a.get("Gain"):
+        try:
+            put("gain", max(0.0, round(float(a["Gain"]), 1)), f"Gain: {a['Gain']} dB")
+        except ValueError:
+            pass
+    if a.get("NormLevel", "").isdigit():
+        put("norm_strength", int(a["NormLevel"]), f"Normalize level: {a['NormLevel']}%")
+    pls = cp["Playlist"] if cp.has_section("Playlist") else {}
+    if pls.get("Shuffle") == "1":
+        put("folder_order", "shuffle", "Folder order: shuffle")
+    flag("NextOnError", "next_on_error", "Skip files that won't open", section=pls)
+
     osd = cp["OSD"] if cp.has_section("OSD") else {}
-    if osd.get("Font"):
-        put("osd_font", osd["Font"], f"On-screen message font: {osd['Font']}")
+    flag("LocalTime", "osd_clock", "Clock in full screen", section=osd)
     if osd.get("Size", "").isdigit():
         put("osd_size", int(osd["Size"]), f"On-screen message size: {osd['Size']}")
     if "FileName" in osd:
