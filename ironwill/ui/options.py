@@ -243,6 +243,8 @@ class OptionsDialog(QDialog):
             lay.addWidget(hint)
         elif page.special == "about":
             lay.addWidget(self._about_box())
+        elif page.special == "formats":
+            lay.addWidget(self._formats_box())
         lay.addStretch(1)
         self.page_keys[page.id] = keys
         scroll = QScrollArea()
@@ -440,6 +442,46 @@ class OptionsDialog(QDialog):
         lay.addLayout(col)
         self.fields["shaders"] = (lambda: [lst.item(i).text() for i in range(lst.count())],
                                   lambda v: (lst.clear(), lst.addItems(v)))
+        return box
+
+    def _formats_box(self):
+        from .. import associate
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
+        groups = (("Video files", associate.VIDEO_EXTS), ("Audio files", associate.AUDIO_EXTS))
+        checks = {}
+        for title, exts in groups:
+            cb = QCheckBox(f"{title}  ({', '.join(e.lstrip('.') for e in exts)})")
+            cb.setChecked(any(associate.registered(e) for e in exts) or title == "Video files")
+            cb.setStyleSheet("QCheckBox { padding: 4px 0; }")
+            checks[title] = cb
+            v.addWidget(cb)
+        row = QHBoxLayout()
+        status = QLabel("")
+        status.setObjectName("note")
+        status.setWordWrap(True)
+
+        def do_register():
+            try:
+                associate.register(video=checks["Video files"].isChecked(), audio=checks["Audio files"].isChecked())
+            except Exception as exc:
+                status.setText(f"Couldn't register: {exc}")
+                return
+            status.setText("Registered. Now pick Iron Will for each type in Default Apps (opening it for you).")
+            associate.open_default_apps()
+
+        def do_remove():
+            associate.remove()
+            status.setText("Iron Will's file types were removed from Windows.")
+        for text, fn in (("Register with Windows", do_register), ("Open Default Apps", associate.open_default_apps),
+                         ("Remove registration", do_remove)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch(1)
+        v.addLayout(row)
+        v.addWidget(status)
         return box
 
     def _about_box(self):

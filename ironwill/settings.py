@@ -457,6 +457,9 @@ PAGES = [
          note="Finds copies of the same video even when they were re-encoded, resized, mirrored, cut short or given an "
               "added intro, then lets you compare any two side by side, synced, before sending extras to the "
               "Recycle Bin."),
+    Page("formats", "File Types", special="formats",
+         note="Lets Windows open these files with Iron Will. Windows only allows you to pick the default player, so "
+              "Default Apps opens at Iron Will's page for the final click."),
     Page("misc", "Miscellaneous", special="about", groups=[
         ("Advanced", [
             S("custom_opts", "Extra mpv options (one per line: name=value)", "", kind="multiline"),
