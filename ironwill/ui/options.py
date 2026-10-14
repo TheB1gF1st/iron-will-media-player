@@ -523,7 +523,8 @@ class OptionsDialog(QDialog):
                 return None
 
         decoders = prop("decoder-list") or []
-        info = QLabel(f"mpv {str(prop('mpv-version') or '').replace('mpv ', '')}  ·  FFmpeg "
+        from .. import __version__, SUPPORT_URL
+        info = QLabel(f"Iron Will {__version__}  ·  mpv {str(prop('mpv-version') or '').replace('mpv ', '')}  ·  FFmpeg "
                       f"{prop('ffmpeg-version') or '?'}  ·  {len(decoders)} decoders available")
         info.setObjectName("note")
         info.setWordWrap(True)
@@ -531,7 +532,7 @@ class OptionsDialog(QDialog):
         row = QHBoxLayout()
         for text, fn in (("Import from MPC-BE…", self._import_mpcbe),
                          ("Open settings folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(DATA_DIR)))),
-                         ("Reset everything", self._reset_all)):
+                         ("Reset everything", self._reset_all)) +                         ((("Support Iron Will ♥", lambda: QDesktopServices.openUrl(QUrl(SUPPORT_URL))),) if SUPPORT_URL else ()):
             b = QPushButton(text)
             b.clicked.connect(fn)
             row.addWidget(b)

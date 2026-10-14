@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT.parent / "Release"
 LIBMPV = Path(r"E:\MPV\libmpv-2.dll")
 FFMPEG_DIR = Path(r"E:\_Misc\FFMpeg8.1.2EssentialsBuild")
-VERSION = sys.argv[1] if len(sys.argv) > 1 else "1.0.0"
+VERSION = sys.argv[1] if len(sys.argv) > 1 else __import__("re").search(
+    r'__version__ = "(.+?)"', (ROOT / "ironwill" / "__init__.py").read_text()).group(1)
 
 THIRD_PARTY = """Iron Will Media Player bundles these programs, each under its own licence:
 
