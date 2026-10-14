@@ -78,12 +78,13 @@ PAGES = [
             S("history_max", "Remember where I left off in up to", 500, lo=10, hi=5000, step=10, suffix=" files"),
             S("fav_position", "Favorites reopen at the saved time", True),
             S("remember_tracks", "Remember the audio and subtitle tracks I pick for each file", True,
-              tip="MPC-BE: Player > Remember selected audio and subtitle tracks"),
+              tip="Files you never changed still open in your preferred languages (English unless you change it "
+                  "on the Audio and Subtitles pages). This only remembers the ones you switched by hand."),
             S("recent_count", "Recent files to remember", 20, lo=0, hi=100, zero_text="Don't keep a history",
               tip="How many files File > Recent shows. 0 turns the history off and clears it."),
         ]),
         ("Opening files", [
-            S("allow_multiple", "Allow multiple Iron Will windows (each video opens in its own window)", True,
+            S("allow_multiple", "Allow multiple instances of Iron Will", True,
               tip="Checked: every video you open gets its own window. Unchecked: new videos play in the window "
                   "that's already open. Takes effect the next time Iron Will starts."),
             S("next_on_error", "If a file won't open, skip to the next one in the folder", True),
