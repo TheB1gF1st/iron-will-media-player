@@ -998,6 +998,8 @@ class MainWindow(QMainWindow):
 
     def _topmost_wanted(self):
         mode = self.cfg["on_top"]
+        if self.isFullScreen():
+            return True  # full screen always sits above everything (so later re-applies never drop it)
         return mode == "always" or (mode == "playing" and bool(self.engine.path) and not self.paused)
 
     # MPC-BE-style menu features -------------------------------------------------------------------------
