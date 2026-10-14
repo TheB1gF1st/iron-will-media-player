@@ -223,9 +223,6 @@ class MainWindow(QMainWindow):
     def __init__(self, start_file=None):
         super().__init__()
         self.settings = QSettings("IronWill", "IronWillMediaPlayer")
-        self.fs_guard = QTimer(self)  # keeps full screen above always-on-top overlays that re-raise themselves
-        self.fs_guard.setInterval(1000)
-        self.fs_guard.timeout.connect(self._fs_keep_on_top)
         self.setWindowTitle("Iron Will Media Player")
         self.setMinimumSize(480, 300)
         self.setAcceptDrops(True)
@@ -994,67 +991,10 @@ class MainWindow(QMainWindow):
             pass  # Windows 10 has no outline or rounded corners
 
     def _fs_keep_on_top(self):
-        """Full screen sits above always-on-top desktop extras (PC Manager's boost bar, widgets) so nothing
-        floats over the movie. Steps aside only when you switch to another app on the same monitor."""
-        if not self.isFullScreen() or not self.isVisible():
-            self.fs_guard.stop()
-            return
-        u32 = ctypes.windll.user32
-        u32.GetForegroundWindow.restype = ctypes.c_void_p
-        u32.MonitorFromWindow.restype = ctypes.c_void_p
-        fg = u32.GetForegroundWindow()
-        pid = ctypes.c_ulong()
-        u32.GetWindowThreadProcessId(ctypes.c_void_p(fg), ctypes.byref(pid))
-        ours = int(self.winId())
-        mine = pid.value == os.getpid()
-        same_screen = fg and u32.MonitorFromWindow(ctypes.c_void_p(fg), 2) == u32.MonitorFromWindow(ctypes.c_void_p(ours), 2)
-        want = mine or not same_screen or self._topmost_wanted()
-        is_top = bool(u32.GetWindowLongW(ctypes.c_void_p(ours), -20) & 0x8)  # WS_EX_TOPMOST
-        if self._menu_open():
-            return  # never touch the z-order while a right-click or title-bar menu is up
-        if not want:
-            if is_top:
-                set_topmost(ours, False)
-            return
-        # Only re-raise when another app's window actually sits over the video. Re-raising for nothing would
-        # close the right-click menu (and any other popup) the moment it opens.
-        if not is_top or self._covered(ours):
-            set_topmost(ours, True)
-
-    @staticmethod
-    def _menu_open():
-        """A Qt popup or a native Windows menu (window class #32768) from Iron Will is showing."""
-        from PySide6.QtWidgets import QApplication
-        if QApplication.activePopupWidget() is not None:
-            return True
-        u32 = ctypes.windll.user32
-        u32.FindWindowW.restype = ctypes.c_void_p
-        h = u32.FindWindowW("#32768", None)
-        if h and u32.IsWindowVisible(ctypes.c_void_p(h)):
-            pid = ctypes.c_ulong()
-            u32.GetWindowThreadProcessId(ctypes.c_void_p(h), ctypes.byref(pid))
-            return pid.value == os.getpid()
-        return False
-
-    @staticmethod
-    def _covered(hwnd):
-        """True if a visible window from another program is above `hwnd` in the z-order and overlaps it."""
-        u32 = ctypes.windll.user32
-        u32.GetWindow.restype = ctypes.c_void_p
-        mine = ctypes.wintypes.RECT()
-        u32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(mine))
-        h = u32.GetWindow(ctypes.c_void_p(hwnd), 3)  # GW_HWNDPREV: the window just above
-        pid = ctypes.c_ulong()
-        while h:
-            if u32.IsWindowVisible(ctypes.c_void_p(h)):
-                u32.GetWindowThreadProcessId(ctypes.c_void_p(h), ctypes.byref(pid))
-                r = ctypes.wintypes.RECT()
-                u32.GetWindowRect(ctypes.c_void_p(h), ctypes.byref(r))
-                overlaps = r.left < mine.right and r.right > mine.left and r.top < mine.bottom and r.bottom > mine.top
-                if pid.value != os.getpid() and overlaps and r.right - r.left > 1 and r.bottom - r.top > 1:
-                    return True
-            h = u32.GetWindow(ctypes.c_void_p(h), 3)
-        return False
+        """Full screen goes on top once (above desktop extras like PC Manager's boost bar) and stays there.
+        No timers, no re-raising."""
+        if self.isFullScreen() and self.isVisible():
+            set_topmost(int(self.winId()), True)
 
     def _topmost_wanted(self):
         mode = self.cfg["on_top"]
@@ -1891,7 +1831,6 @@ class MainWindow(QMainWindow):
                 self.move(target.geometry().topLeft())
             self.showFullScreen()
             self._fs_keep_on_top()
-            self.fs_guard.start()
             self.bar.full.set_glyph(Glyph.WINDOW)
             self._update_clock()
             if self.cfg["fs_refresh"]:
@@ -1909,7 +1848,6 @@ class MainWindow(QMainWindow):
 
     def exit_fullscreen(self):
         if self.isFullScreen():
-            self.fs_guard.stop()
             self.showMaximized() if self.was_maximized else self.showNormal()
             self._set_topmost(self._topmost_wanted())
             self.menuBar().setVisible(bool(self.cfg["show_menubar"]))
