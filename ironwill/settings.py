@@ -108,7 +108,7 @@ PAGES = [
     ]),
     Page("interface", "Interface", "player", groups=[
         ("Controls", [
-            S("hide_delay", "Hide controls after", 2.5, lo=1, hi=15, step=0.5, suffix=" s"),
+            S("hide_delay", "Hide controls after", 2.5, lo=1, hi=15, step=0.1, suffix=" s"),
             S("show_chevrons", "Show previous / next arrows at the sides", True),
             S("title_color", "Title color (the video name above the timeline)", "#FFFFFF", kind="color"),
             S("controls_gap", "Controls distance from the bottom edge", 24, lo=0, hi=96, step=2, suffix=" px",
