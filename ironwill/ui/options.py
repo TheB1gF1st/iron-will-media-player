@@ -3,9 +3,9 @@ per-page Default) in Iron Will's dark style. Pages are generated from ironwill.s
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QKeySequence
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox,
                                QFileDialog, QFontComboBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
                                QHeaderView, QKeySequenceEdit, QLabel, QLineEdit, QListWidget, QMessageBox,
                                QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QStackedWidget,
@@ -168,6 +168,21 @@ class OptionsDialog(QDialog):
         self.baseline = self._collect()
         self._watch_changes()
         self._refresh_dirty()
+        # The mouse wheel never changes a setting: over a drop-down, number box or slider it just scrolls the page,
+        # so running the wheel down the list can't flip values by accident. Open a drop-down to pick with it.
+        for cls in (QComboBox, QSpinBox, QDoubleSpinBox, QSlider):
+            for w in self.findChildren(cls):
+                w.installEventFilter(self)
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.Type.Wheel and isinstance(obj, (QComboBox, QSpinBox, QDoubleSpinBox, QSlider)):
+            p = obj.parentWidget()
+            while p is not None and not isinstance(p, QScrollArea):
+                p = p.parentWidget()
+            if p is not None:
+                QApplication.sendEvent(p.verticalScrollBar(), e)
+            return True
+        return super().eventFilter(obj, e)
 
     def _watch_changes(self):
         hooks = [(QCheckBox, "toggled"), (QComboBox, "currentIndexChanged"), (QSpinBox, "valueChanged"),
