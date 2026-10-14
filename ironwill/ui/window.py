@@ -991,7 +991,53 @@ class MainWindow(QMainWindow):
         ours = int(self.winId())
         mine = pid.value == os.getpid()
         same_screen = fg and u32.MonitorFromWindow(ctypes.c_void_p(fg), 2) == u32.MonitorFromWindow(ctypes.c_void_p(ours), 2)
-        set_topmost(ours, mine or not same_screen or self._topmost_wanted())
+        want = mine or not same_screen or self._topmost_wanted()
+        is_top = bool(u32.GetWindowLongW(ctypes.c_void_p(ours), -20) & 0x8)  # WS_EX_TOPMOST
+        if self._menu_open():
+            return  # never touch the z-order while a right-click or title-bar menu is up
+        if not want:
+            if is_top:
+                set_topmost(ours, False)
+            return
+        # Only re-raise when another app's window actually sits over the video. Re-raising for nothing would
+        # close the right-click menu (and any other popup) the moment it opens.
+        if not is_top or self._covered(ours):
+            set_topmost(ours, True)
+
+    @staticmethod
+    def _menu_open():
+        """A Qt popup or a native Windows menu (window class #32768) from Iron Will is showing."""
+        from PySide6.QtWidgets import QApplication
+        if QApplication.activePopupWidget() is not None:
+            return True
+        u32 = ctypes.windll.user32
+        u32.FindWindowW.restype = ctypes.c_void_p
+        h = u32.FindWindowW("#32768", None)
+        if h and u32.IsWindowVisible(ctypes.c_void_p(h)):
+            pid = ctypes.c_ulong()
+            u32.GetWindowThreadProcessId(ctypes.c_void_p(h), ctypes.byref(pid))
+            return pid.value == os.getpid()
+        return False
+
+    @staticmethod
+    def _covered(hwnd):
+        """True if a visible window from another program is above `hwnd` in the z-order and overlaps it."""
+        u32 = ctypes.windll.user32
+        u32.GetWindow.restype = ctypes.c_void_p
+        mine = ctypes.wintypes.RECT()
+        u32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(mine))
+        h = u32.GetWindow(ctypes.c_void_p(hwnd), 3)  # GW_HWNDPREV: the window just above
+        pid = ctypes.c_ulong()
+        while h:
+            if u32.IsWindowVisible(ctypes.c_void_p(h)):
+                u32.GetWindowThreadProcessId(ctypes.c_void_p(h), ctypes.byref(pid))
+                r = ctypes.wintypes.RECT()
+                u32.GetWindowRect(ctypes.c_void_p(h), ctypes.byref(r))
+                overlaps = r.left < mine.right and r.right > mine.left and r.top < mine.bottom and r.bottom > mine.top
+                if pid.value != os.getpid() and overlaps and r.right - r.left > 1 and r.bottom - r.top > 1:
+                    return True
+            h = u32.GetWindow(ctypes.c_void_p(h), 3)
+        return False
 
     def _topmost_wanted(self):
         mode = self.cfg["on_top"]
