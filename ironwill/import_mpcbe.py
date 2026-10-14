@@ -145,6 +145,7 @@ def read(path):
         put("time_right", "remaining" if s["RemainingTime"] == "1" else "total",
             "Right-hand time: " + ("remaining" if s["RemainingTime"] == "1" else "total length"))
     for ini_key, ours, label in (("ShowMilliseconds", "show_ms", "Show milliseconds"),
+                                 ("ChapterMarker", "chapter_marks", "Chapter marks on the seek bar"),
                                  ("SnapToDesktopEdges", "snap_edges", "Snap to screen edges"),
                                  ("LimitWindowProportions", "limit_proportions", "Keep window proportions"),
                                  ("PauseMinimizedVideo", "pause_minimized", "Pause when minimized"),

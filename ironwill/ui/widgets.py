@@ -142,6 +142,7 @@ class SeekBar(QWidget):
         self.duration, self.position = 0.0, 0.0
         self.hover_x, self.dragging = None, False
         self.loop = {"a": None, "b": None}  # A-B loop markers in seconds
+        self.chapters = []  # chapter start times in seconds, drawn as small ticks
         self.last_click = None  # (x, time) of the previous timeline click, for "same spot again clears the loop"
         self.marker_drag = None  # set while a loop tick is held
         self.setFixedHeight(48)  # top 26 px hold the hover time bubble
@@ -150,6 +151,13 @@ class SeekBar(QWidget):
 
     def set_duration(self, d):
         self.duration = d
+        self.update()
+
+    def set_chapters(self, times):
+        """Chapter starts to mark on the line. Files with dozens of chapters (scene markers) get none: the timeline
+        must stay a clean line."""
+        times = sorted(t for t in times if t and t > 0)
+        self.chapters = times if len(times) <= 24 else []
         self.update()
 
     def set_loop_marker(self, which, seconds):
@@ -275,6 +283,15 @@ class SeekBar(QWidget):
         p.drawRoundedRect(QRectF(t.left(), y - thick / 2, t.width(), thick), thick / 2, thick / 2)
         p.setBrush(ACCENT)
         p.drawRoundedRect(QRectF(t.left(), y - thick / 2, px - t.left(), thick), thick / 2, thick / 2)
+        # Chapter marks: tiny dark gaps in the line, only visible up close (and only for a handful of chapters).
+        if self.duration > 0 and self.chapters:
+            p.setBrush(QColor(0, 0, 0, 170))
+            last = -100.0
+            for sec in self.chapters:
+                cx = t.left() + t.width() * min(1.0, sec / self.duration)
+                if cx - last >= 12:  # never crowd them
+                    p.drawRect(QRectF(cx - 1, y - thick / 2, 2, thick))
+                    last = cx
         # A-B loop: amber ticks labeled A / B, with the looped stretch shaded when both are set.
         if self.duration > 0 and (self.loop["a"] is not None or self.loop["b"] is not None):
             def x_of(sec):

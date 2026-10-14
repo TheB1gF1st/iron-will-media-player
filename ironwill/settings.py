@@ -129,6 +129,8 @@ PAGES = [
               [("remaining", "Time remaining"), ("total", "Total length")]),
             S("show_ms", "Show milliseconds", False),
             S("show_zero_hours", "Show hours even under an hour (0:05:12 instead of 5:12)", True),
+            S("chapter_marks", "Show chapter marks on the seek bar", False,
+              tip="Small dots on the timeline. Skipped for files with lots of chapters, so the bar stays clean."),
         ]),
         ("On-screen messages", [
             S("osd_size", "Size", 16, lo=8, hi=48, suffix=" pt"),

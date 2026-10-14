@@ -29,7 +29,7 @@ ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: 
 - **A-B loop** markers on the timeline: draggable, toggle per marker, remembered per file, and **saved as their own
   video clip** from a right-click on the seek bar (fast copy or frame-accurate)
 - **Window transparency** like Glass2K, built in: View → Transparency, Ctrl+Shift+↑/↓, or Ctrl+Shift+1…0
-- Seek-bar **picture preview** and a full-screen clock
+- Seek-bar **picture preview**, chapter marks, and a full-screen clock
 - Playback rate in 5% steps (configurable) from the bottom bar, the menu or Ctrl+↑/↓
 - Click-and-hold: right third fast-forwards, left third rewinds
 

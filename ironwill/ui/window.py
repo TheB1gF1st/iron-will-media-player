@@ -1430,6 +1430,11 @@ class MainWindow(QMainWindow):
         self._external_tracks()
         self._restore_tracks()
         self._apply_video_zoom()
+        try:
+            chapters = [c.get("time", 0) for c in (self.engine.mpv._get_property("chapter-list") or [])]
+        except Exception:
+            chapters = []
+        self.bar.seek.set_chapters(chapters if self.cfg["chapter_marks"] else [])
         if self.cfg["auto_fit"] != "off" and not (self.isFullScreen() or self.isMaximized() or self.mini_geometry):
             QTimer.singleShot(150, lambda: self.fit_to_video(self.cfg["auto_fit"]))
         if self.cfg["osd_filename"]:
