@@ -192,6 +192,10 @@ PAGES = [
             S("pitch", "Keep voices natural when speeding up", True, mpv="audio-pitch-correction", to_mpv=YES_NO),
             S("speed_step", "Increase / Decrease Rate step", 5, lo=1, hi=50, suffix=" %",
               tip="How much each speed up / slow down changes the speed (MPC-BE: Options > Playback > Speed step)"),
+            S("clip_save", "Saving A-B clips", "ask",
+              [("ask", "Ask every time (starts in the video's folder)"), ("last", "Ask, starting in the last folder I used"),
+               ("folder", "Save straight to the folder below")]),
+            S("clip_folder", "A-B clips folder", "", kind="folder"),
         ]),
         ("Next / previous file in a folder", [
             S("folder_order", "Play files in this order", "explorer",

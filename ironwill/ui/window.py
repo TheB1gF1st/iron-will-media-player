@@ -736,11 +736,28 @@ class MainWindow(QMainWindow):
             return
         stamp = lambda t: fmt_time(t).replace(":", ".")
         ext = ".mp4" if precise else Path(src).suffix
-        default = Path(src).with_name(f"{Path(src).stem} clip {stamp(a)} - {stamp(b)}{ext}")
-        out, _ = QFileDialog.getSaveFileName(self, "Save A-B Clip", str(default),
-                                             "Video (*.mp4)" if precise else f"Video (*{ext})")
+        name = f"{Path(src).stem} clip {stamp(a)} - {stamp(b)}{ext}"
+        mode, folder = self.cfg["clip_save"], Path(self.cfg["clip_folder"] or ".")
+        out = ""
+        if mode == "folder" and self.cfg["clip_folder"]:
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                target, n = folder / name, 2
+                while target.exists():  # never overwrite an earlier clip
+                    target = folder / f"{Path(name).stem} ({n}){ext}"
+                    n += 1
+                out = str(target)
+            except OSError:
+                out = ""  # folder unavailable (unplugged drive...): fall back to asking
         if not out:
-            return
+            start = Path(src).parent
+            if mode == "last" and self.settings.value("clip_last_dir", ""):
+                start = Path(self.settings.value("clip_last_dir"))
+            out, _ = QFileDialog.getSaveFileName(self, "Save A-B Clip", str(start / name),
+                                                 "Video (*.mp4)" if precise else f"Video (*{ext})")
+            if not out:
+                return
+            self.settings.setValue("clip_last_dir", str(Path(out).parent))
         if precise:
             args = ["-y", "-v", "error", "-ss", f"{a:.3f}", "-i", src, "-t", f"{b - a:.3f}", "-map", "0:v:0", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
