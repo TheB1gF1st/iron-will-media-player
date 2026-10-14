@@ -223,6 +223,9 @@ class MainWindow(QMainWindow):
     def __init__(self, start_file=None):
         super().__init__()
         self.settings = QSettings("IronWill", "IronWillMediaPlayer")
+        self.fs_guard = QTimer(self)  # keeps full screen above always-on-top overlays that re-raise themselves
+        self.fs_guard.setInterval(1000)
+        self.fs_guard.timeout.connect(self._fs_keep_on_top)
         self.setWindowTitle("Iron Will Media Player")
         self.setMinimumSize(480, 300)
         self.setAcceptDrops(True)
@@ -972,6 +975,23 @@ class MainWindow(QMainWindow):
             self.dwm_results.append(ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_CORNER, ctypes.byref(corner), 4))
         except Exception:
             pass  # Windows 10 has no outline or rounded corners
+
+    def _fs_keep_on_top(self):
+        """Full screen sits above always-on-top desktop extras (PC Manager's boost bar, widgets) so nothing
+        floats over the movie. Steps aside only when you switch to another app on the same monitor."""
+        if not self.isFullScreen() or not self.isVisible():
+            self.fs_guard.stop()
+            return
+        u32 = ctypes.windll.user32
+        u32.GetForegroundWindow.restype = ctypes.c_void_p
+        u32.MonitorFromWindow.restype = ctypes.c_void_p
+        fg = u32.GetForegroundWindow()
+        pid = ctypes.c_ulong()
+        u32.GetWindowThreadProcessId(ctypes.c_void_p(fg), ctypes.byref(pid))
+        ours = int(self.winId())
+        mine = pid.value == os.getpid()
+        same_screen = fg and u32.MonitorFromWindow(ctypes.c_void_p(fg), 2) == u32.MonitorFromWindow(ctypes.c_void_p(ours), 2)
+        set_topmost(ours, mine or not same_screen or self._topmost_wanted())
 
     def _topmost_wanted(self):
         mode = self.cfg["on_top"]
@@ -1802,6 +1822,8 @@ class MainWindow(QMainWindow):
                 self.windowHandle().setScreen(target)
                 self.move(target.geometry().topLeft())
             self.showFullScreen()
+            self._fs_keep_on_top()
+            self.fs_guard.start()
             self.bar.full.set_glyph(Glyph.WINDOW)
             self._update_clock()
             if self.cfg["fs_refresh"]:
@@ -1819,7 +1841,9 @@ class MainWindow(QMainWindow):
 
     def exit_fullscreen(self):
         if self.isFullScreen():
+            self.fs_guard.stop()
             self.showMaximized() if self.was_maximized else self.showNormal()
+            self._set_topmost(self._topmost_wanted())
             self.menuBar().setVisible(bool(self.cfg["show_menubar"]))
             self.bar.full.set_glyph(Glyph.FULL)
             self._dwm_outline()
