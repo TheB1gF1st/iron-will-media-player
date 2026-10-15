@@ -162,8 +162,10 @@ class Welcome(QWidget):
         lay.addSpacing(14)
         # Reads as "I will … media player": the promise that it plays anything.
         sub = QLabel("MEDIA PLAYER")
-        f2 = ui_font(22, QFont.Weight.DemiBold)
-        f2.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 10)
+        f2 = QFont("Segoe UI")  # thin and widely spaced, like the "MEDIA" in the I Will Media logo
+        f2.setPixelSize(30)
+        f2.setWeight(QFont.Weight.Normal)
+        f2.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 16)
         sub.setFont(f2)
         btn = QPushButton("  Open a file")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
