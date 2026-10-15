@@ -12,6 +12,11 @@ format there is.
 ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: unzip it anywhere and double-click
 **Iron Will.exe**. mpv and FFmpeg are included.
 
+## Support
+
+Iron Will is free and always will be. If it's made your movie nights better, you can buy me a coffee on
+**[Ko-fi ♥](https://ko-fi.com/ironwillmedia)**. It helps keep the updates coming.
+
 ## Highlights
 
 **The look**
