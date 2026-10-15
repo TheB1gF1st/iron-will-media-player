@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, QSettings, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import (QAction, QColor, QCursor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPixmap,
-                           QGuiApplication, QRadialGradient)
+                           QGuiApplication, QRadialGradient, QFontDatabase, QFontMetrics, QPen)
 from PySide6.QtWidgets import (QFileDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QVBoxLayout, QWidget, QApplication, QPushButton)
 
@@ -147,6 +147,27 @@ class CaptionBar(QWidget):
         p.drawPath(path)
 
 
+class BrandLabel(QWidget):
+    """Text drawn as filled outlines with a hair of extra stroke, so the thin Poiret One reads on the dark screen."""
+
+    def __init__(self, text, font, color, stroke=1.1, parent=None):
+        super().__init__(parent)
+        self.text, self.font_, self.color, self.stroke = text, font, QColor(color), stroke
+        m = QFontMetrics(font)
+        self.setFixedSize(m.horizontalAdvance(text) + 8, m.height() + 4)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addText(0, 0, self.font_, self.text)
+        r = path.boundingRect()
+        path.translate((self.width() - r.width()) / 2 - r.left(), (self.height() - r.height()) / 2 - r.top())
+        p.setPen(QPen(self.color, self.stroke))
+        p.setBrush(self.color)
+        p.drawPath(path)
+
+
 class Welcome(QWidget):
     """Shown before anything is opened."""
 
@@ -161,12 +182,13 @@ class Welcome(QWidget):
         lay.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addSpacing(14)
         # Reads as "I will … media player": the promise that it plays anything.
-        sub = QLabel("MEDIA PLAYER")
-        f2 = QFont("Segoe UI")  # thin and widely spaced, like the "MEDIA" in the I Will Media logo
-        f2.setPixelSize(30)
-        f2.setWeight(QFont.Weight.Normal)
+        # Poiret One (SIL OFL, bundled): the same lettering as "MEDIA" in the I Will Media logo, a hair thicker.
+        fid = QFontDatabase.addApplicationFont(str(ASSETS / "fonts" / "PoiretOne-Regular.ttf"))
+        fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+        f2 = QFont(fams[0] if fams else "Segoe UI")
+        f2.setPixelSize(34)
         f2.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 16)
-        sub.setFont(f2)
+        sub = BrandLabel("MEDIA PLAYER", f2, "#E81123")
         btn = QPushButton("  Open a file")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -177,7 +199,6 @@ class Welcome(QWidget):
         btn.clicked.connect(on_open)
         hint = QLabel("or drop a video anywhere  ·  Ctrl+O")
         hint.setFont(ui_font(14))
-        sub.setStyleSheet("color: #E81123;")
         hint.setStyleSheet("color: rgba(255,255,255,140);")
         lay.addWidget(sub, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addSpacing(40)

@@ -19,6 +19,8 @@ THIRD_PARTY = """Iron Will Media Player bundles these programs, each under its o
 
 - mpv / libmpv (libmpv-2.dll): GPL-2.0-or-later. https://mpv.io  (Windows build: shinchiro/mpv-winbuild-cmake)
 - FFmpeg (ffmpeg\\ffmpeg.exe, ffmpeg\\ffprobe.exe): GPL-3.0, "essentials" build. https://ffmpeg.org
+- Poiret One font by Denis Masharov (start screen): SIL Open Font License 1.1, licence text in
+  _internal\ironwill\assets\fonts\PoiretOne-OFL.txt. https://fonts.google.com/specimen/Poiret+One
   (see ffmpeg\\LICENSE). Used only by Find Duplicates.
 - Qt for Python (PySide6): LGPL-3.0. https://www.qt.io/qt-for-python
 - Python: PSF License. https://python.org
