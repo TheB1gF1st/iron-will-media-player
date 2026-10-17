@@ -29,6 +29,14 @@ Iron Will is free and always will be. If it's made your movie nights better, you
 
 <sub>Demo video: "Spooky Stories with Aleera!", an original AI-animated short by I Will Media.</sub>
 
+<details>
+<summary><b>All menus &amp; settings (38 more screenshots)</b></summary>
+
+<img src="docs/screenshots/all/01.jpg" width="49%"> <img src="docs/screenshots/all/02.jpg" width="49%"> <img src="docs/screenshots/all/03.jpg" width="49%"> <img src="docs/screenshots/all/04.jpg" width="49%"> <img src="docs/screenshots/all/05.jpg" width="49%"> <img src="docs/screenshots/all/06.jpg" width="49%"> <img src="docs/screenshots/all/07.jpg" width="49%"> <img src="docs/screenshots/all/08.jpg" width="49%"> <img src="docs/screenshots/all/09.jpg" width="49%"> <img src="docs/screenshots/all/10.jpg" width="49%"> <img src="docs/screenshots/all/11.jpg" width="49%"> <img src="docs/screenshots/all/12.jpg" width="49%"> <img src="docs/screenshots/all/13.jpg" width="49%"> <img src="docs/screenshots/all/14.jpg" width="49%"> <img src="docs/screenshots/all/15.jpg" width="49%"> <img src="docs/screenshots/all/16.jpg" width="49%"> <img src="docs/screenshots/all/17.jpg" width="49%"> <img src="docs/screenshots/all/18.jpg" width="49%"> <img src="docs/screenshots/all/19.jpg" width="49%"> <img src="docs/screenshots/all/20.jpg" width="49%"> <img src="docs/screenshots/all/21.jpg" width="49%"> <img src="docs/screenshots/all/22.jpg" width="49%"> <img src="docs/screenshots/all/23.jpg" width="49%"> <img src="docs/screenshots/all/24.jpg" width="49%"> <img src="docs/screenshots/all/25.jpg" width="49%"> <img src="docs/screenshots/all/26.jpg" width="49%"> <img src="docs/screenshots/all/27.jpg" width="49%"> <img src="docs/screenshots/all/28.jpg" width="49%"> <img src="docs/screenshots/all/29.jpg" width="49%"> <img src="docs/screenshots/all/30.jpg" width="49%"> <img src="docs/screenshots/all/31.jpg" width="49%"> <img src="docs/screenshots/all/32.jpg" width="49%"> <img src="docs/screenshots/all/33.jpg" width="49%"> <img src="docs/screenshots/all/34.jpg" width="49%"> <img src="docs/screenshots/all/35.jpg" width="49%"> <img src="docs/screenshots/all/36.jpg" width="49%"> <img src="docs/screenshots/all/37.jpg" width="49%"> <img src="docs/screenshots/all/38.jpg" width="49%">
+
+</details>
+
+
 ## Highlights
 
 **The look**
