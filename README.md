@@ -17,6 +17,18 @@ ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: 
 Iron Will is free and always will be. If it's made your movie nights better, you can buy me a coffee on
 **[Ko-fi ♥](https://ko-fi.com/ironwillmedia)**. It helps keep the updates coming.
 
+## Screenshots
+
+<p align="center"><img src="docs/screenshots/player.jpg" width="900" alt="Iron Will playing a video with its clean Movies & TV style controls"></p>
+
+| | |
+|---|---|
+| <img src="docs/screenshots/ab-loop-clip.jpg" alt="A-B loop marked on the timeline with the Save A-B Clip menu"><br>**A-B loop + save the loop as its own clip** | <img src="docs/screenshots/menu.jpg" alt="Right-click menu"><br>**MPC-BE-depth right-click menu** |
+| <img src="docs/screenshots/options-mouse.jpg" alt="Options window, mouse page"><br>**Options: every mouse button, your way** | <img src="docs/screenshots/duplicate-finder.jpg" alt="Duplicate Finder results"><br>**Built-in Duplicate Finder** |
+| <img src="docs/screenshots/compare.jpg" alt="Side-by-side duplicate compare"><br>**Side-by-side compare of duplicates** | |
+
+<sub>Demo video: "Spooky Stories with Aleera!", an original AI-animated short by I Will Media.</sub>
+
 ## Highlights
 
 **The look**
