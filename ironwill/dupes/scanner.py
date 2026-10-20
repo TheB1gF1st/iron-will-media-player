@@ -89,8 +89,9 @@ class Scanner(QObject):
         self.stop_event = threading.Event()
         self.thread = None
 
-    def start(self, folders, threshold=0.8, subfolders=True, partial_clips=True, mirrored=True, workers=3):
+    def start(self, folders, threshold=0.8, subfolders=True, partial_clips=True, mirrored=True, workers=3, min_mb=1):
         self.stop_event.clear()
+        self.min_mb = min_mb
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        args=(folders, threshold, subfolders, partial_clips, mirrored, workers))
         self.thread.start()
@@ -102,7 +103,7 @@ class Scanner(QObject):
         t0 = time.time()
         store = Store()
         self.progress.emit("Finding videos…", 0, 0, "")
-        files = collect(folders, subfolders)
+        files = collect(folders, subfolders, getattr(self, "min_mb", 1))
         fps, todo = [], []
         for p in files:
             try:

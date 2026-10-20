@@ -464,7 +464,31 @@ PAGES = [
     ], note="Iron Will uses FFmpeg's built-in decoders through mpv: no codec packs needed."),
     Page("shaders", "Shaders", special="shaders", groups=[("Shaders", [S("shaders_on", "Use the shaders below", True)])],
          note="GLSL shaders run on every frame (e.g. FSRCNNX, Anime4K, adaptive sharpen). Order matters: top runs first."),
-    Page("duplicates", "Duplicate Finder", special="dupes",
+    Page("duplicates", "Duplicate Finder", special="dupes", groups=[
+        ("Scanning speed", [
+            S("dupe_workers", "Videos read at the same time", 3, lo=1, hi=16, suffix=" videos",
+              tip="More is faster on CPUs with many cores. Lower it if your PC feels sluggish during a scan."),
+            S("dupe_low_priority", "Scan at low priority (keeps videos and other apps smooth)", True,
+              tip="FFmpeg runs below normal priority, so watching a video or browsing stays smooth while it scans."),
+            S("dupe_hwaccel", "Hardware decoding", "none",
+              [("none", "Off: CPU only (best without a dedicated GPU)"), ("auto", "Automatic"),
+               ("cuda", "NVIDIA (CUDA)"), ("qsv", "Intel Quick Sync"), ("amf", "AMD (AMF)"), ("d3d11va", "Direct3D 11 (any GPU)"), ("d3d12va", "Direct3D 12 (any GPU)"),
+               ("dxva2", "DXVA2 (older GPUs)")],
+              tip="The scan only decodes keyframes, so a dedicated GPU helps most with 4K or HEVC libraries. "
+                  "Integrated graphics can be SLOWER than the CPU here because every frame is copied back to memory."),
+        ]),
+        ("What to read", [
+            S("dupe_sample_gap", "Seconds between samples", 1.0, lo=0.5, hi=10, step=0.5, suffix=" s",
+              tip="Lower = more precise matching of short clips, but larger fingerprints. Applies to videos read "
+                  "from now on (Clear saved fingerprints re-reads everything)."),
+            S("dupe_min_mb", "Skip videos smaller than", 1, lo=0, hi=500, suffix=" MB", zero_text="Don't skip any"),
+        ]),
+        ("FFmpeg", [
+            S("dupe_ffmpeg_dir", "FFmpeg folder (empty = the one bundled with Iron Will)", "", kind="folder",
+              tip="A folder containing ffmpeg.exe and ffprobe.exe, to use your own build (for example one with "
+                  "extra hardware decoders)."),
+        ]),
+    ],
          note="Finds copies of the same video even when they were re-encoded, resized, mirrored, cut short or given an "
               "added intro, then lets you compare any two side by side, synced, before sending extras to the "
               "Recycle Bin."),

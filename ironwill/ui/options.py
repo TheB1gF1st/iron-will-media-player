@@ -256,6 +256,18 @@ class OptionsDialog(QDialog):
             hint = QLabel("Also in the right-click menu: File > Find Duplicates…  (Ctrl+D)")
             hint.setObjectName("note")
             lay.addWidget(hint)
+            tools = QHBoxLayout()
+            for text, fn in (("Test FFmpeg", self._test_ffmpeg), ("Clear saved fingerprints…", self._clear_fingerprints)):
+                b = QPushButton(text)
+                b.clicked.connect(fn)
+                tools.addWidget(b)
+            tools.addStretch(1)
+            lay.addLayout(tools)
+            self.ffmpeg_info = QLabel("")
+            self.ffmpeg_info.setObjectName("note")
+            self.ffmpeg_info.setWordWrap(True)
+            self.ffmpeg_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            lay.addWidget(self.ffmpeg_info)
         elif page.special == "about":
             lay.addWidget(self._about_box())
         elif page.special == "formats":
@@ -510,6 +522,37 @@ class OptionsDialog(QDialog):
         v.addLayout(row)
         v.addWidget(status)
         return box
+
+    def _test_ffmpeg(self):
+        """Show which FFmpeg the scanner will use, its version and the hardware decoders it supports."""
+        import subprocess
+        from ..dupes import fingerprint as fpmod
+        fpmod.SETTINGS["ffmpeg_dir"] = self._collect().get("dupe_ffmpeg_dir", "") or ""
+        exe = fpmod.find_tool("ffmpeg")
+        if not exe:
+            self.ffmpeg_info.setText("FFmpeg wasn't found. Pick the folder that contains ffmpeg.exe above.")
+            return
+        try:
+            ver = subprocess.run([exe, "-hide_banner", "-version"], capture_output=True, text=True, timeout=20,
+                                 creationflags=0x08000000).stdout.splitlines()[0]
+            hw = subprocess.run([exe, "-hide_banner", "-hwaccels"], capture_output=True, text=True, timeout=20,
+                                creationflags=0x08000000).stdout.split()
+            hw = [h for h in hw if h not in ("Hardware", "acceleration", "methods:")]
+        except Exception as exc:
+            self.ffmpeg_info.setText(f"FFmpeg failed to run: {exc}")
+            return
+        self.ffmpeg_info.setText(f"Using: {exe}\n{ver}\nHardware decoders this FFmpeg supports: "
+                                 f"{', '.join(hw) or 'none'} (your PC also needs a matching GPU and driver)")
+
+    def _clear_fingerprints(self):
+        if QMessageBox.question(self, "Clear saved fingerprints",
+                                "Forget every saved video fingerprint? The next scan will read all videos again "
+                                "(slow), but it picks up new settings like the sample spacing.") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        from ..dupes.store import Store
+        Store().clear()
+        self.ffmpeg_info.setText("Saved fingerprints cleared. The next scan reads every video again.")
 
     def _about_box(self):
         box = QGroupBox("Tools and information")

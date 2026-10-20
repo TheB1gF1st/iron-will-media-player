@@ -38,11 +38,16 @@ def _size(n):
 
 class FinderWindow(QDialog):
     def __init__(self, win):
-        super().__init__(win)
+        # No parent: a free-standing window with its own taskbar button, so it can be minimized or sent behind
+        # the player (or anything else) while a long scan runs.
+        super().__init__(None)
         self.win, self.cfg = win, win.cfg
         self.setWindowTitle("Find Duplicates - Iron Will")
+        self.setWindowIcon(win.windowIcon())
         self.setStyleSheet(EXTRA)
-        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowMinimizeButtonHint |
+                            Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
+        win.destroyed.connect(self.close)
         self.resize(1280, 800)
         self.groups = []
         self.scanner = Scanner(self)
@@ -63,7 +68,7 @@ class FinderWindow(QDialog):
         top.addWidget(self.folders, 1)
         fbtns = QVBoxLayout()
         for text, fn in (("Add folder…", self._add_folder), ("Remove", self._remove_folders),
-                         ("Import from VDF", self._import_vdf)):
+                         ("Import from VDF", self._import_vdf), ("Scan settings…", self._settings)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             fbtns.addWidget(b)
@@ -182,8 +187,19 @@ class FinderWindow(QDialog):
         self.tree.clear()
         self.scan_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        from .fingerprint import configure, find_tool
+        configure(self.cfg)
+        if not find_tool("ffmpeg"):
+            self.scan_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+            self.status.setText("FFmpeg wasn't found. Set its folder in Scan settings…")
+            return
         self.scanner.start(folders, self.threshold.value() / 100, self.subfolders.isChecked(),
-                           self.clips.isChecked(), self.mirrored.isChecked())
+                           self.clips.isChecked(), self.mirrored.isChecked(), workers=int(self.cfg["dupe_workers"]),
+                           min_mb=int(self.cfg["dupe_min_mb"]))
+
+    def _settings(self):
+        self.win.open_options("duplicates")
 
     def _progress(self, phase, done, total, detail):
         self.bar.setRange(0, max(total, 0))

@@ -45,7 +45,11 @@ class Side(QWidget):
 
 class CompareWindow(QDialog):
     def __init__(self, parent, left, right):
-        super().__init__(parent)
+        super().__init__(None)  # free-standing: can be minimized or sent behind other windows
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowMinimizeButtonHint |
+                            Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
+        if parent is not None:
+            parent.destroyed.connect(self.close)
         self.setWindowTitle("Compare - Iron Will")
         self.setStyleSheet(STYLE)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)

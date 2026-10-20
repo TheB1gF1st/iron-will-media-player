@@ -26,7 +26,24 @@ CREATE_NO_WINDOW = 0x08000000
 FFMPEG_DIRS = [APP_DIR / "ffmpeg", APP_DIR, Path(r"E:\_Misc\FFMpeg8.1.2EssentialsBuild\bin")]
 
 
+BELOW_NORMAL_PRIORITY = 0x00004000
+SETTINGS = {"ffmpeg_dir": "", "low_priority": True, "hwaccel": "none", "min_gap": MIN_GAP}
+
+
+def configure(cfg):
+    """Pick up the Duplicate Finder settings from Options before a scan."""
+    SETTINGS.update(ffmpeg_dir=cfg["dupe_ffmpeg_dir"] or "", low_priority=bool(cfg["dupe_low_priority"]),
+                    hwaccel=cfg["dupe_hwaccel"] or "none", min_gap=float(cfg["dupe_sample_gap"] or MIN_GAP))
+
+
+def _flags():
+    return CREATE_NO_WINDOW | (BELOW_NORMAL_PRIORITY if SETTINGS["low_priority"] else 0)
+
+
 def find_tool(name):
+    custom = SETTINGS.get("ffmpeg_dir")
+    if custom and (Path(custom) / f"{name}.exe").exists():
+        return str(Path(custom) / f"{name}.exe")
     for d in FFMPEG_DIRS:
         if (d / f"{name}.exe").exists():
             return str(d / f"{name}.exe")
@@ -81,7 +98,7 @@ def probe(path):
     exe = find_tool("ffprobe")
     out = subprocess.run([exe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
                          capture_output=True, text=True, encoding="utf-8", errors="replace",
-                         creationflags=CREATE_NO_WINDOW, timeout=120)
+                         creationflags=_flags(), timeout=120)
     info = json.loads(out.stdout or "{}")
     fmt = info.get("format", {})
     v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"
@@ -115,10 +132,11 @@ def fingerprint(path, stop=None):
         setattr(fp, k, v)
 
     # Keyframes only, scaled to 32x32 grey; showinfo prints each frame's timestamp on stderr.
-    cmd = [find_tool("ffmpeg"), "-hide_banner", "-nostdin", "-v", "info", "-skip_frame", "nokey", "-i", str(p),
+    hw = [] if SETTINGS["hwaccel"] in ("", "none") else ["-hwaccel", SETTINGS["hwaccel"]]
+    cmd = [find_tool("ffmpeg"), "-hide_banner", "-nostdin", "-v", "info", *hw, "-skip_frame", "nokey", "-i", str(p),
            "-an", "-sn", "-dn", "-vf", f"scale={FRAME}:{FRAME}:flags=area,format=gray,showinfo",
            "-fps_mode", "passthrough", "-f", "rawvideo", "pipe:1"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_flags())
     stderr_lines = []
 
     def read_stderr():
@@ -155,7 +173,7 @@ def fingerprint(path, stop=None):
     # At most one sample per second (some files have keyframes every few frames).
     keep, last = [], -1e9
     for i, tt in enumerate(times):
-        if tt - last >= MIN_GAP:
+        if tt - last >= SETTINGS["min_gap"]:
             keep.append(i)
             last = tt
     frames, times = frames[keep], times[keep]
@@ -173,7 +191,7 @@ def frame_hash_at(path, t, flip=False):
     vf = f"scale={FRAME}:{FRAME}:flags=area,format=gray" + (",hflip" if flip else "")
     out = subprocess.run([find_tool("ffmpeg"), "-hide_banner", "-nostdin", "-v", "error", "-ss", f"{max(0.0, t):.3f}",
                           "-i", str(path), "-an", "-sn", "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "pipe:1"],
-                         capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+                         capture_output=True, creationflags=_flags(), timeout=60)
     raw = out.stdout[: FRAME * FRAME]
     if len(raw) < FRAME * FRAME:
         return None, True
