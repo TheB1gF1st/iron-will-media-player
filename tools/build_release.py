@@ -11,8 +11,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT.parent / "Release"
-LIBMPV = Path(r"E:\MPV\libmpv-2.dll")
-FFMPEG_DIR = Path(r"E:\_Misc\FFMpeg8.1.2EssentialsBuild")
+# Where libmpv-2.dll and an FFmpeg build (with bin/ffmpeg.exe and bin/ffprobe.exe) are. The defaults are the author's
+# PC; anyone else sets IW_LIBMPV and IW_FFMPEG_DIR (see README, "Building it yourself").
+LIBMPV = Path(os.environ.get("IW_LIBMPV", r"E:\MPV\libmpv-2.dll"))
+FFMPEG_DIR = Path(os.environ.get("IW_FFMPEG_DIR", r"E:\_Misc\FFMpeg8.1.2EssentialsBuild"))
 VERSION = sys.argv[1] if len(sys.argv) > 1 else __import__("re").search(
     r'__version__ = "(.+?)"', (ROOT / "ironwill" / "__init__.py").read_text()).group(1)
 
@@ -48,6 +50,10 @@ VERSION_INFO = """VSVersionInfo(
 
 
 def main():
+    for need, what in ((LIBMPV, "libmpv-2.dll (set IW_LIBMPV)"), (FFMPEG_DIR / "bin" / "ffmpeg.exe",
+                                                                  "FFmpeg (set IW_FFMPEG_DIR)")):
+        if not need.exists():
+            sys.exit(f"Missing {what}: {need}")
     dist, work = OUT / "dist", OUT / "build"
     work.mkdir(parents=True, exist_ok=True)
     nums = ", ".join(([p for p in VERSION.split(".") if p.isdigit()] + ["0", "0", "0"])[:3])

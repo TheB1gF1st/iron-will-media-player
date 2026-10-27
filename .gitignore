@@ -190,3 +190,6 @@ ffmpeg/
 
 # OpenSubtitles developer key: kept off GitHub, copied into the release by build_release.py
 opensubs.key
+
+# ...except the release build recipe, which belongs in the repo
+!tools/iron_will.spec

@@ -110,8 +110,18 @@ python tools\register_windows.py
 If your Python isn't at the default location, put the path to `pythonw.exe` in a file called `python-path.txt` next to
 `IronWill.exe`.
 
-To build the ready-to-run release yourself: `pip install pyinstaller`, set the libmpv and FFmpeg paths at the top of
-`tools/build_release.py`, then run `python tools\build_release.py 1.0.0`.
+To build the ready-to-run release yourself: `pip install pyinstaller faster-whisper`, point the build at your copies
+of libmpv and FFmpeg, then run it (the recipe is `tools/iron_will.spec`):
+
+```
+set IW_LIBMPV=C:\path\to\libmpv-2.dll
+set IW_FFMPEG_DIR=C:\path\to\ffmpeg-build
+python tools\build_release.py
+```
+
+`IW_FFMPEG_DIR` is the folder that has `bin\ffmpeg.exe` and `bin\ffprobe.exe`. The online subtitle search needs an
+OpenSubtitles API key in a file called `opensubs.key` next to `IronWill.pyw` (kept out of the repository); without
+it, making subtitles from the audio still works.
 
 ## Keyboard basics
 

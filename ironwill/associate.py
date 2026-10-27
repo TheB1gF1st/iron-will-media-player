@@ -35,6 +35,14 @@ def _set(path, name, value):
         winreg.SetValueEx(k, name, 0, winreg.REG_SZ, value)
 
 
+def _get(path, name):
+    try:
+        with winreg.OpenKey(HKCU, path) as k:
+            return str(winreg.QueryValueEx(k, name)[0])
+    except OSError:
+        return ""
+
+
 def _delete_tree(path):
     try:
         with winreg.OpenKey(HKCU, path, 0, winreg.KEY_ALL_ACCESS) as k:
@@ -77,7 +85,10 @@ def register(video=True, audio=False):
     icon = f'"{icon}",0' if icon.exists() else f'"{exe}",0'
     for old in OLD_APP_KEYS:
         _delete_tree(old)
-    if not FROZEN:  # before the split the source copy registered under the release's name and keys: hand them back
+    mine = _get(r"Software\Classes\IronWill.Video\shell\open\command", "").lower().startswith(f'"{exe}"'.lower())
+    if not FROZEN and mine:
+        # Before the split the source copy registered under the release's name and keys: hand them back (only when
+        # they still point at this source copy, never when the real release owns them)
         _delete_tree(r"Software\Classes\IronWill.Video")
         _delete_tree(r"Software\Classes\IronWill.Audio")
         _delete_tree(r"Software\IronWill\MediaPlayer")
@@ -120,7 +131,7 @@ def register(video=True, audio=False):
 def remove():
     exe = program()
     for key in (rf"Software\Classes\{PROGID}", rf"Software\Classes\{PROGID_AUDIO}",
-                rf"Software\Classes\Applications\{exe.name}", r"Software\Classes\Applications\IronWill.exe",
+                rf"Software\Classes\Applications\{exe.name}",
                 CAPS.rsplit("\\", 1)[0], *OLD_APP_KEYS):  # not all of Software\IronWill: the player's settings live there
         _delete_tree(key)
     _delete_value(r"Software\RegisteredApplications", APP_NAME)

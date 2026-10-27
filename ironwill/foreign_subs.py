@@ -126,7 +126,7 @@ def find_online(video, lang="en", api_key="", username="", password="", full=Fal
     def same_title(a):  # a title search can return other movies: keep only ones sharing the title's words
         name = str((a.get("feature_details") or {}).get("movie_name") or a.get("release") or "").lower()
         return a.get("moviehash_match") or not words or words <= set(re.findall(r"[a-z0-9]+", name))
-    cam = re.compile(r"(?i)(hd)?(cam|ts|telesync|tc|hdts|r5|scr|screener)")
+    cam = re.compile(r"(?i)\b(hd)?(cam|ts|telesync|tc|hdts|r5|scr|screener)\b")
     files = [(a.get("moviehash_match", False), not cam.search(str(a.get("release") or "")),
               a.get("download_count", 0), f["file_id"])
              for a in (r.get("attributes", {}) for r in results)
@@ -188,29 +188,45 @@ def align_to_audio(video, srt):
     return best
 
 
-def _wide_shift(ffmpeg, video, cues, search=600.0):
-    """The shift (seconds) that best lines the cue starts up with speech starts, over the whole soundtrack."""
-    import bisect
+def _speech_onsets(ffmpeg, video, sr=16000, block_minutes=10):
+    """Where speech starts in the whole soundtrack (seconds). Read and checked 10 minutes at a time, so a long movie
+    never sits in memory whole (a 2.5-hour film would be ~600 MB as one piece)."""
     from faster_whisper.vad import VadOptions, get_speech_timestamps
     import numpy as np
 
-    sr = 16000
-    raw = subprocess.run([str(ffmpeg), "-v", "error", "-nostdin", "-i", str(video), "-map", "0:a:0", "-ac", "1",
-                          "-ar", str(sr), "-f", "s16le", "-"], capture_output=True,
-                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-    audio = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
-    onsets = [t["start"] / sr for t in get_speech_timestamps(audio, VadOptions(min_silence_duration_ms=150,
-                                                                                speech_pad_ms=0))]
-    if not onsets:
-        return 0.0
+    proc = subprocess.Popen([str(ffmpeg), "-v", "error", "-nostdin", "-i", str(video), "-map", "0:a:0", "-ac", "1",
+                             "-ar", str(sr), "-f", "s16le", "-"], stdout=subprocess.PIPE,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    onsets, offset, size = [], 0, sr * 60 * block_minutes * 2  # bytes: 16-bit samples
+    try:
+        while True:
+            raw = proc.stdout.read(size)
+            if not raw:
+                break
+            block = np.frombuffer(raw[:len(raw) // 2 * 2], np.int16).astype(np.float32) / 32768.0
+            onsets += [(offset + t["start"]) / sr for t in
+                       get_speech_timestamps(block, VadOptions(min_silence_duration_ms=150, speech_pad_ms=0))]
+            offset += len(block)
+    finally:
+        proc.stdout.close()
+        proc.wait()
+    return np.array(onsets)
 
-    def score(shift):
-        total = 0.0
-        for c in cues:
-            i = bisect.bisect_left(onsets, c + shift)
-            near = min(abs(c + shift - onsets[j]) for j in (i - 1, i) if 0 <= j < len(onsets))
-            total += max(0.0, 0.4 - near)
-        return total
+
+def _wide_shift(ffmpeg, video, cues, search=600.0):
+    """The shift (seconds) that best lines the cue starts up with speech starts, over the whole soundtrack."""
+    import numpy as np
+
+    onsets = _speech_onsets(ffmpeg, video)
+    if not len(onsets):
+        return 0.0
+    cue_starts = np.array(cues)
+
+    def score(shift):  # each cue earns up to 0.4 for starting within 0.4 s of a speech start
+        at = cue_starts + shift
+        i = np.clip(np.searchsorted(onsets, at), 1, len(onsets) - 1)
+        near = np.minimum(np.abs(at - onsets[i - 1]), np.abs(at - onsets[i]))
+        return float(np.clip(0.4 - near, 0, None).sum())
     # Every shift within +/- 10 minutes, then a finer look around the winner. Dialogue starts all the time in a busy
     # scene, so a shift only counts when it clearly beats both "no shift" and the best shift somewhere else.
     scores = {i / 4: score(i / 4) for i in range(int(-search * 4), int(search * 4) + 1)}
