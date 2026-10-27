@@ -7,13 +7,15 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, QSettings, Qt, QTimer, QVariantAnimation
+from PySide6.QtCore import QObject, Signal, QEasingCurve, QEvent, QPoint, QRectF, QSettings, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import (QAction, QColor, QCursor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPixmap,
                            QGuiApplication, QRadialGradient, QFontDatabase, QFontMetrics, QPen)
 from PySide6.QtWidgets import (QFileDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QVBoxLayout, QWidget, QApplication, QPushButton)
 
-from .. import display, playlist, taskbar
+import threading
+
+from .. import display, foreign_subs, playlist, taskbar
 from ..engine import PlayerEngine
 from ..settings import LANGUAGES, Config, apply_to_mpv
 from ..video_view import MpvVideoWidget
@@ -1457,6 +1459,8 @@ class MainWindow(QMainWindow):
         self._enforce_languages()
         self._external_tracks()
         self._restore_tracks()
+        self._force_foreign_subs()
+        self._auto_find_foreign_subs()
         self._apply_video_zoom()
         try:
             chapters = [c.get("time", 0) for c in (self.engine.mpv._get_property("chapter-list") or [])]
@@ -1489,6 +1493,82 @@ class MainWindow(QMainWindow):
                 self.engine.select_track(kind, None, remember=False)
             elif track_id in ids:
                 self.engine.select_track(kind, track_id, remember=False)
+
+    def _force_foreign_subs(self):
+        """Show a "forced" subtitle track (only the lines spoken in another language) even when subtitles are off.
+        When the user already has a subtitle track on, that track is left alone."""
+        if not self.cfg["force_foreign_subs"]:
+            return
+        try:
+            current = self.engine.mpv.sid
+        except Exception:
+            current = None
+        if current not in (None, False, "no"):
+            return
+        want = str(self.cfg["sub_lang"] or "").lower()
+        def is_forced(t):
+            name = " ".join(str(t.get(k) or "") for k in ("title", "external-filename")).lower()
+            return bool(t.get("forced")) or "forced" in name
+        for t in self.engine.tracks("sub"):
+            lang = str(t.get("lang") or "").lower()
+            if is_forced(t) and (not lang or not want or lang.startswith(want[:2])):
+                self.engine.select_track("sub", t["id"], remember=False)
+                return
+
+    def find_foreign_subs(self, online=True, quiet=False):
+        """Get a forced subtitle (only the other-language lines) in the background, then show it. Online asks
+        OpenSubtitles (made-up languages like Dothraki); offline translates real languages with Whisper."""
+        video, lang = self.engine.path, (LANGUAGES.get(self.cfg["sub_lang"], ("en", ""))[0].split(",")[0] or "en")[:2]
+        if not video or getattr(self, "_subs_job", None):
+            return
+        if not online and not foreign_subs.whisper_available():
+            self.toast.show_message("The offline translator isn't installed")
+            return
+        self._subs_bridge = getattr(self, "_subs_bridge", None) or _SubsBridge(self._foreign_subs_done)
+        bridge, c = self._subs_bridge, self.cfg
+        self._subs_job = video
+
+        def work():
+            try:
+                if online:
+                    path, left = foreign_subs.find_online(video, lang, c["opensubs_key"], c["opensubs_user"],
+                                                          c["opensubs_pass"])
+                    note = f"Foreign-dialogue subtitles downloaded from OpenSubtitles"
+                    if left is not None:
+                        note += f" ({left} downloads left today)"
+                else:
+                    path, n = foreign_subs.scan_audio(video, lang, lambda f, m: bridge.done.emit(video, None, m, True))
+                    note = f"Translated {n} foreign lines"
+                bridge.done.emit(video, str(path), note, False)
+            except Exception as e:
+                bridge.done.emit(video, None, "" if quiet else str(e), False)
+
+        if not online:
+            self.toast.show_message("Translating foreign dialogue in the background…")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _foreign_subs_done(self, video, path, note, partial):
+        if partial:
+            return  # progress from the offline scan: the message would cover the movie every few seconds
+        self._subs_job = None
+        if note:
+            self.toast.show_message(note)
+        if path and video == self.engine.path:
+            self.engine.mpv.command("sub-add", path, "auto")
+            self._force_foreign_subs()
+
+    def _auto_find_foreign_subs(self):
+        if not (self.cfg["force_foreign_subs"] and self.cfg["find_foreign_subs"]):
+            return
+        if any(t.get("forced") or "forced" in str(t.get("external-filename") or "").lower()
+               for t in self.engine.tracks("sub")):
+            return
+        tried = set(self.settings.value("foreign_subs_tried", []) or [])
+        key = self.engine.path.lower()
+        if key in tried:
+            return  # looked once already: don't search again every time the file opens
+        self.settings.setValue("foreign_subs_tried", list(tried | {key})[-2000:])
+        self.find_foreign_subs(online=True, quiet=True)
 
     def _enforce_languages(self):
         """mpv already prefers the chosen language by track tag (alang/slang). This is the backup for files whose
@@ -2249,3 +2329,12 @@ class MainWindow(QMainWindow):
         self.video.shutdown()
         self.engine.shutdown()
         super().closeEvent(e)
+
+
+class _SubsBridge(QObject):
+    """Carries the background subtitle job's result back to the UI thread."""
+    done = Signal(str, object, str, bool)
+
+    def __init__(self, slot):
+        super().__init__()
+        self.done.connect(slot)

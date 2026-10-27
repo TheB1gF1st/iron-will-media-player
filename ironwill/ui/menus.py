@@ -204,6 +204,8 @@ def sections(win):
     ] + tracks("sub", True) + [
         SEP,
         Item("Load External Subtitle…", win._add_subs, enabled=loaded),
+        Item("Find Foreign-Dialogue Subtitles Online", lambda: win.find_foreign_subs(online=True), enabled=loaded),
+        Item("Translate Foreign Dialogue (offline, slow)", lambda: win.find_foreign_subs(online=False), enabled=loaded),
         Item("Advanced", enabled=loaded, children=[
             Item(f"Delay +{cfg['sub_delay_step']} ms", lambda: win.nudge_delay("sub-delay", cfg["sub_delay_step"] / 1000, "Subtitle delay"), keys("sub_delay_up")),
             Item(f"Delay -{cfg['sub_delay_step']} ms", lambda: win.nudge_delay("sub-delay", -cfg["sub_delay_step"] / 1000, "Subtitle delay"), keys("sub_delay_down")),

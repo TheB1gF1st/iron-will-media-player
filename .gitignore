@@ -187,3 +187,6 @@ ffmpeg/
 *.dll
 *.sqlite
 
+
+# OpenSubtitles developer key: kept off GitHub, copied into the release by build_release.py
+opensubs.key

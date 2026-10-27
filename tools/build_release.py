@@ -41,6 +41,8 @@ def main():
     if (FFMPEG_DIR / "LICENSE").exists():
         shutil.copy2(FFMPEG_DIR / "LICENSE", app / "ffmpeg" / "LICENSE")
     shutil.copy2(ROOT / "LICENSE", app / "LICENSE.txt")
+    if (ROOT / "opensubs.key").exists():
+        shutil.copy2(ROOT / "opensubs.key", app / "opensubs.key")
     (app / "THIRD-PARTY-NOTICES.txt").write_text(THIRD_PARTY, encoding="utf-8")
     (app / "README.txt").write_text(
         f"Iron Will Media Player {VERSION}\n\nDouble-click 'Iron Will.exe' to start. No installation needed: keep this "
