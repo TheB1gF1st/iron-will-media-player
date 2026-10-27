@@ -125,7 +125,58 @@ def find_online(video, lang="en", api_key="", username="", password=""):
         text = r.read()
     dest = out_path(video, lang)
     dest.write_bytes(text)
+    try:
+        align_to_audio(video, dest)
+    except Exception:
+        pass  # a subtitle a little off is still better than none
     return dest, got.get("remaining")
+
+
+# Timing -------------------------------------------------------------------------------------------------------
+CUE = re.compile(r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)")
+
+
+def _secs(h, m, s, ms):
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")[:3]) / 1000
+
+
+def align_to_audio(video, srt, search=5.0):
+    """Downloaded subtitles are often timed for a slightly different cut of the video (another release, an intro
+    trimmed off). Line each cue's start up with where speech actually starts in this file, try every shift within
+    +/- `search` seconds, and rewrite the file with the best one. Returns the shift applied (0 if unsure)."""
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
+    import numpy as np
+
+    ffmpeg = _find(FFMPEG_DIRS, "ffmpeg.exe")
+    text = Path(srt).read_text(encoding="utf-8", errors="replace")
+    cues = [_secs(*m.groups()[:4]) for m in CUE.finditer(text)]
+    if not ffmpeg or not cues:
+        return 0.0
+    sr, pad = 16000, search + 1
+    onsets = []
+    for start in cues:  # only decode the audio around each cue, not the whole video
+        a = max(0.0, start - pad)
+        raw = subprocess.run([str(ffmpeg), "-v", "error", "-nostdin", "-ss", f"{a:.2f}", "-t", f"{2 * pad:.2f}",
+                              "-i", str(video), "-map", "0:a:0", "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
+                             capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        audio = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+        onsets.append([t["start"] / sr + a for t in
+                       get_speech_timestamps(audio, VadOptions(min_silence_duration_ms=150, speech_pad_ms=0))])
+
+    def score(shift):  # how many cues start within 0.4 s of a speech start (closer counts more)
+        return sum(max((0.4 - abs(c + shift - x) for x in xs), default=0) if xs else 0 for c, xs in zip(cues, onsets))
+    shifts = [i / 20 for i in range(int(-search * 20), int(search * 20) + 1)]
+    scores = {sh: score(sh) for sh in shifts}
+    best = max(scores, key=scores.get)
+    # Speech starts all the time in a busy scene, so only move when one shift clearly beats leaving it alone.
+    if abs(best) < 0.15 or scores[best] < max(1.5 * scores[0.0], 0.1 * len(cues)):
+        return 0.0
+
+    def moved(m):
+        g = m.groups()
+        return f"{_ts(max(0.0, _secs(*g[:4]) + best))} --> {_ts(max(0.0, _secs(*g[4:]) + best))}"
+    Path(srt).write_text(CUE.sub(moved, text), encoding="utf-8")
+    return best
 
 
 # Offline -----------------------------------------------------------------------------------------------------

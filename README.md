@@ -12,6 +12,9 @@ format there is.
 ready-to-run zip for Windows 10/11 (64-bit). No installer and no Python needed: unzip it anywhere and double-click
 **Iron Will.exe**. mpv and FFmpeg are included.
 
+Tip: before unzipping, right-click the zip > Properties > tick **Unblock** > OK. Otherwise Windows asks
+"Are you sure you want to run this software?" the first time (the app isn't code-signed yet).
+
 ## Support
 
 Iron Will is free and always will be. If it's made your movie nights better, you can buy me a coffee on
@@ -54,6 +57,7 @@ Iron Will is free and always will be. If it's made your movie nights better, you
 - **Foreign dialogue always subtitled:** lines spoken in another language (Dothraki, Kahndaqi, Klingon, or a real
   language) show automatically even with subtitles off. Iron Will finds a "forced" subtitle file online
   (OpenSubtitles, foreign parts only), or translates real languages offline with Whisper (model downloads on first use)
+  and lines downloaded subtitles up with your copy's audio automatically
 - **A-B loop** markers on the timeline: draggable, toggle per marker, remembered per file, and **saved as their own
   video clip** from a right-click on the seek bar (fast copy or frame-accurate)
 - **Window transparency** like Glass2K, built in: View → Transparency, Ctrl+Shift+↑/↓, or Ctrl+Shift+1…0
