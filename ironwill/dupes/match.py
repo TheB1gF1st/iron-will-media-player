@@ -31,7 +31,8 @@ class PairResult:
 
 
 def _usable(fp):
-    return len(fp.hashes) >= MIN_SAMPLES and not fp.error
+    # Flat frames are never compared, so a mostly black or blank file can't reach MIN_SAMPLES matches anyway.
+    return int((~fp.flat).sum()) >= MIN_SAMPLES and not fp.error
 
 
 def candidate_pairs(fps, min_shared=3, common_limit=0.05):
@@ -45,16 +46,32 @@ def candidate_pairs(fps, min_shared=3, common_limit=0.05):
                 keys = ((good >> np.uint64(16 * band)) & np.uint64(0xFFFF)).astype(np.uint32)
                 for k in np.unique(keys):
                     index[(band, int(k))].add(i)
-    limit = max(3, int(len(fps) * common_limit))
+    # A band shared by a handful of files is a group of copies (original, re-encodes, mirrors, clips), not a logo.
+    limit = max(16, int(len(fps) * common_limit))
     shared = defaultdict(int)
+    crowded = defaultdict(int)   # files sharing more than `limit` bands -> how many bands they share
+    keys_per_file = defaultdict(int)
     for members in index.values():
-        if len(members) < 2 or len(members) > limit:
+        for i in members:
+            keys_per_file[i] += 1
+        if len(members) < 2:
+            continue
+        if len(members) > limit:
+            crowded[frozenset(members)] += 1
             continue
         ms = sorted(members)
         for x in range(len(ms)):
             for y in range(x + 1, len(ms)):
                 shared[(ms[x], ms[y])] += 1
-    return [pair for pair, n in shared.items() if n >= min_shared]
+    pairs = {pair for pair, n in shared.items() if n >= min_shared}
+    # Too many files for one band to pair them all cheaply: a logo or a stock shot is a few seconds of each file,
+    # but a big group of copies keeps turning up together across most of the shortest one. Such groups still get
+    # compared, so any number of copies is found; one check per group, not per band, keeps large scans fast.
+    for members, n in crowded.items():
+        if n >= max(min_shared, 0.3 * min(keys_per_file[i] for i in members)):
+            ms = sorted(members)
+            pairs.update((ms[x], ms[y]) for x in range(len(ms)) for y in range(x + 1, len(ms)))
+    return list(pairs)
 
 
 def _score(fa, fb, hb, offset):
