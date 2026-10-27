@@ -3,6 +3,7 @@
     E:\\PythonMedia\\python.exe tools\\build_release.py [version]
 
 Output: E:\\IronWillMediaPlayerRepo\\Release\\Iron-Will-Media-Player-<version>-win64.zip"""
+import os
 import shutil
 import subprocess
 import sys
@@ -31,8 +32,27 @@ Iron Will itself is GPL-3.0 (see LICENSE). Source code: https://github.com/TheB1
 """
 
 
+VERSION_INFO = """VSVersionInfo(
+  ffi=FixedFileInfo(filevers=({v}, 0), prodvers=({v}, 0), mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1,
+                    subtype=0x0, date=(0, 0)),
+  kids=[StringFileInfo([StringTable('040904B0', [
+          StringStruct('CompanyName', 'TheB1gF1st'),
+          StringStruct('FileDescription', 'Iron Will Media Player'),
+          StringStruct('FileVersion', '{s}'),
+          StringStruct('InternalName', 'Iron Will'),
+          StringStruct('OriginalFilename', 'Iron Will.exe'),
+          StringStruct('ProductName', 'Iron Will Media Player'),
+          StringStruct('ProductVersion', '{s}')])]),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])])])
+"""
+
+
 def main():
     dist, work = OUT / "dist", OUT / "build"
+    work.mkdir(parents=True, exist_ok=True)
+    nums = ", ".join(([p for p in VERSION.split(".") if p.isdigit()] + ["0", "0", "0"])[:3])
+    (work / "version_info.txt").write_text(VERSION_INFO.format(v=nums, s=VERSION), encoding="utf-8")
+    os.environ["IW_VERSION_FILE"] = str(work / "version_info.txt")
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", str(dist),
                     "--workpath", str(work), str(ROOT / "tools" / "iron_will.spec")], check=True)
     app = dist / "Iron Will Media Player"

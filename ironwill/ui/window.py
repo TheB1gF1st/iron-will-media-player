@@ -173,8 +173,15 @@ class BrandLabel(QWidget):
 class Welcome(QWidget):
     """Shown before anything is opened."""
 
-    def __init__(self, on_open, parent=None):
+    def __init__(self, on_open, parent=None, on_menu=None, on_more=None):
         super().__init__(parent)
+        self.setMouseTracking(True)  # so moving toward the top drops the close orb here as well
+        self.on_menu = on_menu
+        # Top-left "..." for people who don't think to right-click: Settings (the full menu) and Options
+        self.more = IconButton(Glyph.MORE, "Settings and options", parent=self)
+        self.more.move(12, 12)
+        if on_more:
+            self.more.clicked.connect(lambda: on_more(self.more))
         lay = QVBoxLayout(self)
         lay.addStretch(1)
         # "I will" brush script from the Iron Will Fitness logo, scaled to the window in resizeEvent.
@@ -208,6 +215,11 @@ class Welcome(QWidget):
         lay.addSpacing(14)
         lay.addWidget(hint, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch(1)
+
+    def contextMenuEvent(self, e):
+        # It covers the video until something is opened: right-click still brings up the menu (Options, Open...)
+        if self.on_menu:
+            self.on_menu(e.globalPos())
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -297,7 +309,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(stage)
         self.stage = stage
         self.video = MpvVideoWidget(self.engine, stage)
-        self.welcome = Welcome(self.open_dialog, stage)
+        self.welcome = Welcome(self.open_dialog, stage, on_menu=lambda pos: self.show_context_menu(pos),
+                               on_more=self._welcome_more)
         self.bar = BottomBar(stage)
         self.prev_btn = IconButton(Glyph.LEFT, "Previous in folder (PgUp)", 22, 48)
         self.next_btn = IconButton(Glyph.RIGHT, "Next in folder (PgDn)", 22, 48)
@@ -1494,82 +1507,204 @@ class MainWindow(QMainWindow):
             elif track_id in ids:
                 self.engine.select_track(kind, track_id, remember=False)
 
+    def _wanted_subs(self):
+        """Which subtitles to fetch or make: "forced" (only the lines in another language), "full", or both."""
+        return {"foreign": ("forced",), "full": ("full",), "both": ("forced", "full")}.get(self.cfg["subs_fetch"],
+                                                                                          ("forced",))
+
+    def _sub_lang(self):
+        return (LANGUAGES.get(self.cfg["sub_lang"], ("en", ""))[0].split(",")[0] or "en")[:2]
+
+    @staticmethod
+    def _is_forced(t):
+        name = " ".join(str(t.get(k) or "") for k in ("title", "external-filename")).lower()
+        return bool(t.get("forced")) or "forced" in name
+
+    def _missing_subs(self):
+        """The wanted kinds this file doesn't have yet (a full track counts in any language-matching form)."""
+        want = self._sub_lang()
+        have = set()
+        for t in self.engine.tracks("sub"):
+            lang = str(t.get("lang") or "").lower()
+            if self._is_forced(t):
+                have.add("forced")
+            elif not lang or lang.startswith(want):
+                have.add("full")
+        return tuple(k for k in self._wanted_subs() if k not in have)
+
     def _force_foreign_subs(self):
-        """Show a "forced" subtitle track (only the lines spoken in another language) even when subtitles are off.
-        When the user already has a subtitle track on, that track is left alone."""
-        if not self.cfg["force_foreign_subs"]:
-            return
+        """With subtitles off: show the full subtitles if the user asked for them (Options > Subtitles), otherwise a
+        "forced" track (only the lines spoken in another language). A track the user turned on is left alone."""
         try:
             current = self.engine.mpv.sid
         except Exception:
             current = None
         if current not in (None, False, "no"):
             return
-        want = str(self.cfg["sub_lang"] or "").lower()
-        def is_forced(t):
-            name = " ".join(str(t.get(k) or "") for k in ("title", "external-filename")).lower()
-            return bool(t.get("forced")) or "forced" in name
-        for t in self.engine.tracks("sub"):
-            lang = str(t.get("lang") or "").lower()
-            if is_forced(t) and (not lang or not want or lang.startswith(want[:2])):
-                self.engine.select_track("sub", t["id"], remember=False)
-                return
+        want = self._sub_lang()
+        tracks = [t for t in self.engine.tracks("sub")
+                  if not str(t.get("lang") or "") or str(t.get("lang")).lower().startswith(want)]
+        if "full" in self._wanted_subs():
+            pick = next((t for t in tracks if not self._is_forced(t)), None)
+        else:
+            pick = None
+        if pick is None and self.cfg["force_foreign_subs"]:
+            pick = next((t for t in tracks if self._is_forced(t)), None)
+        if pick is not None:
+            self.engine.select_track("sub", pick["id"], remember=False)
 
-    def find_foreign_subs(self, online=True, quiet=False):
-        """Get a forced subtitle (only the other-language lines) in the background, then show it. Online asks
-        OpenSubtitles (made-up languages like Dothraki); offline translates real languages with Whisper."""
-        video, lang = self.engine.path, (LANGUAGES.get(self.cfg["sub_lang"], ("en", ""))[0].split(",")[0] or "en")[:2]
+    def _ask_quality(self, video, kinds):
+        """Let the user pick how accurate (and how slow) the offline scan is. Returns a QUALITY key or None."""
+        what = "full subtitles" if "full" in kinds else "subtitles for the dialogue that isn't in your language"
+        box = QMessageBox(QMessageBox.Icon.Question, "Iron Will Media Player",
+                          f"Iron Will will listen to this video and write {what}. It runs in the background, so you "
+                          "can watch now and the subtitles appear when it's done (or wait and watch with them "
+                          "from the start).\n\nHow accurate should it be?", parent=self)
+        picks = {}
+        for key, label in (("good", "Good"), ("better", "Better"), ("best", "Best (most accurate)")):
+            size = "" if foreign_subs.model_installed(key) else f", {foreign_subs.QUALITY[key][1]} download first"
+            picks[box.addButton(f"{label}: about {foreign_subs.scan_minutes(video, key, kinds)} min{size}",
+                                QMessageBox.ButtonRole.AcceptRole)] = key
+        box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        for button, key in picks.items():
+            if key == self.cfg["scan_quality"]:
+                box.setDefaultButton(button)
+        box.exec()
+        key = picks.get(box.clickedButton())
+        if key and key != self.cfg["scan_quality"]:
+            self.set_prefs({"scan_quality": key})  # remembered for automatic scans
+        return key
+
+    def find_foreign_subs(self, online=True, quiet=False, kinds=None, quality=None):
+        """Get subtitles in the background, then show them. Online asks OpenSubtitles (the only way for made-up
+        languages like Dothraki); offline listens to the audio with Whisper. kinds: see _wanted_subs."""
+        video, lang = self.engine.path, self._sub_lang()
+        kinds = kinds or self._wanted_subs()
         if not video or getattr(self, "_subs_job", None):
             return
         if not online and not foreign_subs.whisper_available():
             self.toast.show_message("The offline translator isn't installed")
             return
+        if not online and quality is None:
+            quality = self._ask_quality(video, kinds)
+            if quality is None or video != self.engine.path or getattr(self, "_subs_job", None):
+                return
         self._subs_bridge = getattr(self, "_subs_bridge", None) or _SubsBridge(self._foreign_subs_done)
         bridge, c = self._subs_bridge, self.cfg
         self._subs_job = video
+        names = {"forced": "foreign-dialogue subtitles", "full": "subtitles"}
 
         def work():
             try:
+                paths, notes, left, errors = [], [], None, []
                 if online:
-                    path, left = foreign_subs.find_online(video, lang, c["opensubs_key"], c["opensubs_user"],
-                                                          c["opensubs_pass"])
-                    note = f"Foreign-dialogue subtitles downloaded from OpenSubtitles"
+                    for kind in kinds:
+                        try:
+                            path, left = foreign_subs.find_online(video, lang, c["opensubs_key"], c["opensubs_user"],
+                                                                  c["opensubs_pass"], full=kind == "full")
+                            paths.append(str(path))
+                            notes.append(names[kind])
+                        except foreign_subs.SubsError as e:
+                            if str(e).startswith("Couldn't reach"):
+                                raise
+                            errors.append(str(e))
+                    if not paths:
+                        raise foreign_subs.SubsError(errors[0] if errors else "Nothing found online")
+                    note = "Downloaded " + " and ".join(notes) + " from OpenSubtitles"
                     if left is not None:
                         note += f" ({left} downloads left today)"
                 else:
-                    path, n = foreign_subs.scan_audio(video, lang, lambda f, m: bridge.done.emit(video, None, m, True))
-                    note = f"Translated {n} foreign lines"
-                bridge.done.emit(video, str(path), note, False)
+                    made = foreign_subs.scan_audio(video, lang, lambda f, m: bridge.done.emit(video, None, m, True),
+                                                   kinds=kinds, quality=quality)
+                    paths = [str(p) for p, _ in made.values()]
+                    note = ", ".join(f"{n} {'foreign' if k == 'forced' else 'subtitle'} lines"
+                                     for k, (_, n) in made.items())
+                    note = "Made " + note
+                bridge.done.emit(video, paths, note, False)
             except Exception as e:
-                bridge.done.emit(video, None, "" if quiet else str(e), False)
+                if online and quiet and str(e).startswith("Couldn't reach"):
+                    bridge.done.emit(video, None, "!offline", False)
+                    return
+                if online and quiet:
+                    bridge.done.emit(video, None, "!none", False)  # searched, nothing there: don't ask every time
+                    return
+                # "?" at the start: a manual online search found nothing, so offer the offline scan instead
+                ask = online and not quiet and foreign_subs.whisper_available()
+                bridge.done.emit(video, None, ("?" if ask else "") + ("" if quiet else str(e)), False)
 
         if not online:
-            first = "" if foreign_subs.model_installed() else " (first time: downloading the ~460 MB translator)"
-            self.toast.show_message("Translating foreign dialogue in the background…" + first)
+            what = "subtitles" if "full" in kinds else "foreign dialogue"
+            self.toast.show_message(f"Making {what} from the audio in the background "
+                                    f"(about {foreign_subs.scan_minutes(video, quality, kinds)} min)…")
         threading.Thread(target=work, daemon=True).start()
 
-    def _foreign_subs_done(self, video, path, note, partial):
+    def _foreign_subs_done(self, video, paths, note, partial):
         if partial:
             return  # progress from the offline scan: the message would cover the movie every few seconds
         self._subs_job = None
+        if note == "!offline":  # the automatic lookup couldn't reach the internet
+            self._offline_offer(video)
+            return
+        if note == "!none":
+            none = set(self.settings.value("foreign_subs_none", []) or [])
+            self.settings.setValue("foreign_subs_none", list(none | {video.lower()})[-2000:])
+            return
+        if note.startswith("?"):
+            if video == self.engine.path and QMessageBox.question(
+                    self, "Iron Will Media Player",
+                    f"{note[1:]}.\n\nListen to the audio and make the subtitles offline instead?\n"
+                    "(Real languages only. Takes about 10-25 minutes in the background.)") \
+                    == QMessageBox.StandardButton.Yes:
+                self.find_foreign_subs(online=False)
+            return
         if note:
             self.toast.show_message(note)
-        if path and video == self.engine.path:
-            self.engine.mpv.command("sub-add", path, "auto")
+        if paths and video == self.engine.path:
+            for path in paths:
+                self.engine.mpv.command("sub-add", path, "auto")
             self._force_foreign_subs()
 
     def _auto_find_foreign_subs(self):
-        if not (self.cfg["force_foreign_subs"] and self.cfg["find_foreign_subs"]):
+        if not (self.cfg["force_foreign_subs"] or "full" in self._wanted_subs()):
             return
-        if any(t.get("forced") or "forced" in str(t.get("external-filename") or "").lower()
-               for t in self.engine.tracks("sub")):
+        missing = self._missing_subs()
+        if not missing:
             return
-        tried = set(self.settings.value("foreign_subs_tried", []) or [])
-        key = self.engine.path.lower()
-        if key in tried:
-            return  # looked once already: don't search again every time the file opens
-        self.settings.setValue("foreign_subs_tried", list(tried | {key})[-2000:])
-        self.find_foreign_subs(online=True, quiet=True)
+        if not self.cfg["find_foreign_subs"]:
+            self._offline_offer(self.engine.path)  # not allowed online: the same as being offline
+            return
+        # Searched before and found nothing: don't search every time the file opens. (A movie whose download
+        # succeeded isn't listed, so if its subtitle file goes missing it's simply looked up again.)
+        if self.engine.path.lower() in set(self.settings.value("foreign_subs_none", []) or []):
+            return
+        self.find_foreign_subs(online=True, quiet=True, kinds=missing)
+
+    def _offline_offer(self, video):
+        """Can't look subtitles up online. Scan with Whisper if the user chose that; otherwise tell them once that
+        the offline scan exists, so nobody misses it."""
+        if not foreign_subs.whisper_available() or video != self.engine.path:
+            return
+        if self.cfg["offline_scan"]:
+            tried = set(self.settings.value("offline_scan_tried", []) or [])
+            if video.lower() not in tried:  # each file is scanned once; the menu item can always run it again
+                self.settings.setValue("offline_scan_tried", list(tried | {video.lower()})[-2000:])
+                self.find_foreign_subs(online=False, quality=self.cfg["scan_quality"])  # chosen already: no asking
+            return
+        if self.settings.value("offline_tip_dismissed", False) in (True, "true"):
+            return
+        box = QMessageBox(QMessageBox.Icon.Information, "Iron Will Media Player",
+                          "Iron Will can't look up subtitles online right now.\n\nIt can listen to the movie and make the subtitles "
+                          "itself instead (real languages only; it runs in the background while you watch).", parent=self)
+        scan = box.addButton("Scan this movie", QMessageBox.ButtonRole.AcceptRole)
+        always = box.addButton("Always do this when offline", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("No thanks", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is no:
+            self.settings.setValue("offline_tip_dismissed", True)  # only "No thanks" silences it for good
+        if box.clickedButton() is always:
+            self.set_prefs({"offline_scan": True})
+        if box.clickedButton() in (scan, always) and video == self.engine.path:
+            self.find_foreign_subs(online=False)
 
     def _enforce_languages(self):
         """mpv already prefers the chosen language by track tag (alang/slang). This is the backup for files whose
@@ -1635,7 +1770,7 @@ class MainWindow(QMainWindow):
     def _update_orb(self, global_pos):
         p = self.stage.mapFromGlobal(global_pos)
         inside = 0 <= p.x() <= self.stage.width() and 0 <= p.y() <= self.stage.height()
-        self._drop_orb(bool(self.engine.path) and inside and p.y() <= self.stage.height() / 4)
+        self._drop_orb(inside and p.y() <= self.stage.height() / 4)  # the start screen too
 
     def _drop_orb(self, show):
         target = 1.0 if show else 0.0
@@ -1806,6 +1941,16 @@ class MainWindow(QMainWindow):
         self.flyout.show()
 
     # Menus ---------------------------------------------------------------------------------------------------
+    def _welcome_more(self, anchor):
+        """The start screen's "..." menu: Settings opens the full right-click menu, Options the Options window."""
+        from . import menus
+        m = dark_menu(self)
+        settings = dark_menu(m, "Settings")
+        menus.fill_qt(settings, menus.build(self), dark_menu)
+        m.addMenu(settings)
+        m.addAction("Options…", self.open_options)
+        m.exec(anchor.mapToGlobal(QPoint(0, anchor.height() + 4)))
+
     def _popup(self, menu, anchor):
         self.hide_timer.stop()
         size = menu.sizeHint()

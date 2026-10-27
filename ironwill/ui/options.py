@@ -351,6 +351,8 @@ class OptionsDialog(QDialog):
         if s.kind == "text":
             w = QLineEdit()
             w.setPlaceholderText(s.tip)
+            if k.endswith("_pass"):
+                w.setEchoMode(QLineEdit.EchoMode.Password)  # dots, not the password
             self.fields[k] = (w.text, w.setText)
             return w, True
         # Numbers: -100..100 picture controls get a slider; everything else a spin box.

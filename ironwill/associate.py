@@ -9,10 +9,12 @@ from pathlib import Path
 
 from .paths import APP_DIR, FROZEN
 
-APP_NAME = "Iron Will Media Player"
-PROGID = "IronWill.Video"
-PROGID_AUDIO = "IronWill.Audio"
-CAPS = r"Software\IronWill\MediaPlayer\Capabilities"
+# The release says its full name in "Open with"; the source copy on the author's PC is just "Iron Will", with its
+# own keys, so the two can be registered side by side without telling each other apart only by their path.
+APP_NAME = "Iron Will Media Player" if FROZEN else "Iron Will"
+PROGID = "IronWill.Video" if FROZEN else "IronWill.Dev.Video"
+PROGID_AUDIO = "IronWill.Audio" if FROZEN else "IronWill.Dev.Audio"
+CAPS = r"Software\IronWill\MediaPlayer\Capabilities" if FROZEN else r"Software\IronWill\MediaPlayerDev\Capabilities"
 VIDEO_EXTS = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v", ".flv", ".ts", ".m2ts", ".mts", ".mpg",
               ".mpeg", ".vob", ".ogv", ".3gp", ".3g2", ".divx", ".rmvb", ".rm", ".asf", ".f4v", ".mxf", ".ogm", ".qt",
               ".mk3d", ".m2v", ".mp2v", ".mpe", ".mpv2", ".wtv", ".dvr-ms", ".y4m", ".hevc", ".avc", ".264", ".265"]
@@ -75,6 +77,14 @@ def register(video=True, audio=False):
     icon = f'"{icon}",0' if icon.exists() else f'"{exe}",0'
     for old in OLD_APP_KEYS:
         _delete_tree(old)
+    if not FROZEN:  # before the split the source copy registered under the release's name and keys: hand them back
+        _delete_tree(r"Software\Classes\IronWill.Video")
+        _delete_tree(r"Software\Classes\IronWill.Audio")
+        _delete_tree(r"Software\IronWill\MediaPlayer")
+        _delete_value(r"Software\RegisteredApplications", "Iron Will Media Player")
+        for ext in VIDEO_EXTS + AUDIO_EXTS:
+            _delete_value(rf"Software\Classes\{ext}\OpenWithProgids", "IronWill.Video")
+            _delete_value(rf"Software\Classes\{ext}\OpenWithProgids", "IronWill.Audio")
     command = f'"{exe}" "%1"'
     for progid, label in ((PROGID, "Video"), (PROGID_AUDIO, "Audio")):
         cls = rf"Software\Classes\{progid}"
@@ -87,19 +97,20 @@ def register(video=True, audio=False):
         _set(cls + r"\shell\open\command", "", command)
     app = rf"Software\Classes\Applications\{exe.name}"
     _set(app, "FriendlyAppName", APP_NAME)
-    _set(app + r"\DefaultIcon", "", f'"{exe}",0')
+    _set(app + r"\DefaultIcon", "", icon)
     _set(app + r"\shell\open\command", "", command)
     _set(CAPS, "ApplicationName", APP_NAME)
     _set(CAPS, "ApplicationDescription", "I will play anything: a Movies & TV look with MPC-BE depth, built on mpv.")
     _set(CAPS, "ApplicationIcon", f'"{exe}",0')
     for exts, on, progid in ((VIDEO_EXTS, video, PROGID), (AUDIO_EXTS, audio, PROGID_AUDIO)):
         for ext in exts:
+            # No SupportedTypes under Applications: Windows would list the app twice in "Open with" (once from it,
+            # once from the file type below), and the second entry has no proper icon
+            _delete_value(app + r"\SupportedTypes", ext)
             if on:
-                _set(app + r"\SupportedTypes", ext, "")
                 _set(CAPS + r"\FileAssociations", ext, progid)
                 _set(rf"Software\Classes\{ext}\OpenWithProgids", progid, "")
             else:
-                _delete_value(app + r"\SupportedTypes", ext)
                 _delete_value(CAPS + r"\FileAssociations", ext)
                 _delete_value(rf"Software\Classes\{ext}\OpenWithProgids", progid)
     _set(r"Software\RegisteredApplications", APP_NAME, CAPS)
@@ -110,7 +121,7 @@ def remove():
     exe = program()
     for key in (rf"Software\Classes\{PROGID}", rf"Software\Classes\{PROGID_AUDIO}",
                 rf"Software\Classes\Applications\{exe.name}", r"Software\Classes\Applications\IronWill.exe",
-                r"Software\IronWill", *OLD_APP_KEYS):
+                CAPS.rsplit("\\", 1)[0], *OLD_APP_KEYS):  # not all of Software\IronWill: the player's settings live there
         _delete_tree(key)
     _delete_value(r"Software\RegisteredApplications", APP_NAME)
     for ext in VIDEO_EXTS + AUDIO_EXTS:
