@@ -51,6 +51,9 @@ Iron Will is free and always will be. If it's made your movie nights better, you
 - **"Welcome back" card:** continue where you left off or start over (only for files you open yourself; next / previous and auto-play always start from the beginning, and positions are forgotten after 7 days by default, adjustable to any number of days)
 - **Preferred audio language** (e.g. always English, even when a file defaults to Japanese), with a title-based fallback
   for badly tagged files; subtitles start off until you want them
+- **Foreign dialogue always subtitled:** lines spoken in another language (Dothraki, Kahndaqi, Klingon, or a real
+  language) show automatically even with subtitles off. Iron Will finds a "forced" subtitle file online
+  (OpenSubtitles, foreign parts only), or translates real languages offline with Whisper (model downloads on first use)
 - **A-B loop** markers on the timeline: draggable, toggle per marker, remembered per file, and **saved as their own
   video clip** from a right-click on the seek bar (fast copy or frame-accurate)
 - **Window transparency** like Glass2K, built in: View → Transparency, Ctrl+Shift+↑/↓, or Ctrl+Shift+1…0

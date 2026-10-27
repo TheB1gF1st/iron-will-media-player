@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 from .paths import APP_DIR
+from .settings import DATA_DIR
 
 API = "https://api.opensubtitles.com/api/v1"
 USER_AGENT = "IronWillMediaPlayer v1.1"
@@ -24,7 +25,9 @@ USER_AGENT = "IronWillMediaPlayer v1.1"
 # for more downloads a day.
 _KEY_FILE = APP_DIR / "opensubs.key"  # kept out of the repo (.gitignore); build_release.py ships it with the app
 APP_API_KEY = _KEY_FILE.read_text(encoding="utf-8").strip() if _KEY_FILE.exists() else ""
-MODEL_DIRS = [APP_DIR / "models" / "whisper-small", Path(r"E:\_Misc\Zip files and installers\whisper-small")]
+MODEL_HOME = DATA_DIR / "models" / "whisper-small"  # downloaded here the first time it's needed (~460 MB)
+MODEL_DIRS = [APP_DIR / "models" / "whisper-small", MODEL_HOME,
+              Path(r"E:\_Misc\Zip files and installers\whisper-small")]  # last one: the author's dev copy
 FFMPEG_DIRS = [APP_DIR / "ffmpeg", APP_DIR, Path(r"E:\_Misc\FFMpeg8.1.2EssentialsBuild\bin")]
 
 
@@ -138,6 +141,10 @@ def whisper_available():
         import faster_whisper  # noqa: F401
     except ImportError:
         return False
+    return True
+
+
+def model_installed():
     return _find(MODEL_DIRS, "model.bin") is not None
 
 
@@ -153,11 +160,19 @@ def scan_audio(video, lang="en", progress=None, cancelled=lambda: False):
     from faster_whisper import WhisperModel
     from faster_whisper.vad import VadOptions, get_speech_timestamps
 
-    model_bin = _find(MODEL_DIRS, "model.bin")
-    ffmpeg = _find(FFMPEG_DIRS, "ffmpeg.exe")
-    if not model_bin or not ffmpeg:
-        raise SubsError("The offline translator (Whisper model or FFmpeg) isn't installed")
     say = progress or (lambda *_: None)
+    ffmpeg = _find(FFMPEG_DIRS, "ffmpeg.exe")
+    if not ffmpeg:
+        raise SubsError("FFmpeg is missing from the Iron Will folder")
+    model_bin = _find(MODEL_DIRS, "model.bin")
+    if not model_bin:
+        from faster_whisper.utils import download_model
+        say(0.0, "Downloading the translator model (one time, ~460 MB)…")
+        try:
+            download_model("small", output_dir=str(MODEL_HOME))
+        except Exception as e:
+            raise SubsError(f"Couldn't download the translator model ({e})") from None
+        model_bin = MODEL_HOME / "model.bin"
     say(0.0, "Reading the audio…")
     sr = 16000
     raw = subprocess.run([str(ffmpeg), "-v", "error", "-nostdin", "-i", str(video), "-map", "0:a:0", "-ac", "1",

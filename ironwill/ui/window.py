@@ -1544,7 +1544,8 @@ class MainWindow(QMainWindow):
                 bridge.done.emit(video, None, "" if quiet else str(e), False)
 
         if not online:
-            self.toast.show_message("Translating foreign dialogue in the background…")
+            first = "" if foreign_subs.model_installed() else " (first time: downloading the ~460 MB translator)"
+            self.toast.show_message("Translating foreign dialogue in the background…" + first)
         threading.Thread(target=work, daemon=True).start()
 
     def _foreign_subs_done(self, video, path, note, partial):

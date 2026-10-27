@@ -24,6 +24,8 @@ THIRD_PARTY = """Iron Will Media Player bundles these programs, each under its o
 - Qt for Python (PySide6): LGPL-3.0. https://www.qt.io/qt-for-python
 - Python: PSF License. https://python.org
 - NumPy: BSD-3-Clause. pywin32: PSF License.
+- faster-whisper, CTranslate2, ONNX Runtime: MIT. Whisper speech model (downloaded on first use): MIT.
+- Subtitles found online come from OpenSubtitles.com.
 
 Iron Will itself is GPL-3.0 (see LICENSE). Source code: https://github.com/TheB1gF1st/iron-will-media-player
 """
