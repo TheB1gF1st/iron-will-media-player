@@ -45,6 +45,10 @@ class SubsError(Exception):
     pass
 
 
+class BurnedIn(SubsError):
+    """The foreign dialogue is already subtitled in the picture itself."""
+
+
 def out_path(video, lang, forced=True):
     """<name>.en.forced.srt for the foreign lines only, <name>.en.srt for full subtitles."""
     return Path(video).with_suffix(f".{lang}.forced.srt" if forced else f".{lang}.srt")
@@ -109,6 +113,26 @@ def _search(key, params):
     return _request(f"{API}/subtitles?{q}", key).get("data", [])
 
 
+def _core(text):
+    """The words that make a title, minus articles and years."""
+    return set(re.findall(r"[a-z0-9]+", str(text).lower())) - {"the", "a", "an"} - {
+        w for w in re.findall(r"\d{4}", str(text)) if 1900 <= int(w) <= 2100}
+
+
+def same_title(a, title, season=None):
+    """Is this search result (OpenSubtitles attributes) for the same title as the file? A title search returns
+    other films with the title's words in them ("Daredevil" finds "Daredevil Drivers"), so the listed title must
+    be the same title, not just contain it."""
+    words = _core(title)
+    if a.get("moviehash_match") or not words:
+        return True
+    fd = a.get("feature_details") or {}
+    listed = fd.get("parent_title") if season else fd.get("title")
+    if listed:
+        return _core(listed) == words
+    return words <= _core(fd.get("movie_name") or a.get("release") or "")
+
+
 def find_online(video, lang="en", api_key="", username="", password="", full=False):
     """Download a foreign-parts-only subtitle for this video (full=True: complete subtitles instead). Returns
     (path, downloads_left_today) or raises SubsError. Searching is free; only the download counts against the
@@ -121,16 +145,11 @@ def find_online(video, lang="en", api_key="", username="", password="", full=Fal
     results = _search(key, {**base, "moviehash": movie_hash(video)})
     if not results and title:
         results = _search(key, {**base, "query": title, "season_number": season, "episode_number": episode})
-    words = set(re.findall(r"[a-z0-9]+", title))
-
-    def same_title(a):  # a title search can return other movies: keep only ones sharing the title's words
-        name = str((a.get("feature_details") or {}).get("movie_name") or a.get("release") or "").lower()
-        return a.get("moviehash_match") or not words or words <= set(re.findall(r"[a-z0-9]+", name))
     cam = re.compile(r"(?i)\b(hd)?(cam|ts|telesync|tc|hdts|r5|scr|screener)\b")
     files = [(a.get("moviehash_match", False), not cam.search(str(a.get("release") or "")),
               a.get("download_count", 0), f["file_id"])
              for a in (r.get("attributes", {}) for r in results)
-             if bool(a.get("foreign_parts_only")) != full and same_title(a)
+             if bool(a.get("foreign_parts_only")) != full and same_title(a, title, season)
              for f in a.get("files", [])[:1]]
     if not files:
         raise SubsError("No subtitles found online for this one" if full
@@ -157,6 +176,8 @@ def find_online(video, lang="en", api_key="", username="", password="", full=Fal
         align_to_audio(video, dest)
     except Exception:
         pass  # a subtitle a little off is still better than none
+    if not full:
+        drop_if_burned_in(video, dest)
     return dest, got.get("remaining")
 
 
@@ -382,4 +403,73 @@ def scan_audio(video, lang="en", progress=None, cancelled=lambda: False, kinds=(
         results[kind] = (dest, len(lines))
     if not results:
         raise SubsError("No foreign-language speech found (made-up languages need the online search)")
+    if "forced" in results:
+        try:
+            drop_if_burned_in(video, results["forced"][0])
+        except BurnedIn:
+            del results["forced"]
+            if not results:
+                raise
     return results
+
+
+# Burned-in check --------------------------------------------------------------------------------------------
+BURN_W, BURN_H = 480, 270
+
+
+def _gray_frame(ffmpeg, video, t):
+    out = subprocess.run([str(ffmpeg), "-v", "error", "-nostdin", "-ss", f"{t:.2f}", "-i", str(video), "-frames:v", "1",
+                          "-vf", f"scale={BURN_W}:{BURN_H},format=gray", "-f", "rawvideo", "-"],
+                         capture_output=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    import numpy as np
+    return np.frombuffer(out, np.uint8).reshape(BURN_H, BURN_W) if len(out) == BURN_W * BURN_H else None
+
+
+def _text_score(img):
+    """Sharp, bright strokes along the best few rows of the subtitle area: a line of white letters gives dozens to
+    hundreds even when it's short ("Where is it?"), a picture without text a handful."""
+    import numpy as np
+    if img is None:
+        return 0
+    band = img[int(BURN_H * 0.72):int(BURN_H * 0.97), int(BURN_W * 0.05):int(BURN_W * 0.95)].astype(np.int16)
+    bright = band > 190
+    edges = (np.abs(np.diff(band, axis=1)) > 50) & (bright[:, :-1] | bright[:, 1:])
+    return int(np.convolve(edges.sum(axis=1), np.ones(3), "same").max())  # letters are several rows tall
+
+
+def burned_in(video, srt, samples=12):
+    """Are this subtitle file's lines already written into the picture? Some releases burn the foreign-dialogue
+    subtitles in, and a downloaded copy on top would show every line twice. Compares the subtitle area while a
+    line should be showing with moments nearby where no line is: text in most of the first and not the second
+    means burned in. Tested: Daredevil S1 E4, 5, 7, 8, 10 (burned in) vs four X-Men / Die Hard films (not)."""
+    import numpy as np
+    ffmpeg = _find(FFMPEG_DIRS, "ffmpeg.exe")
+    text = Path(srt).read_text(encoding="utf-8", errors="replace")
+    cues = [(_secs(*m.groups()[:4]), _secs(*m.groups()[4:])) for m in CUE.finditer(text)]
+    cues = [c for c in cues if c[1] - c[0] >= 1.2]  # long enough to land a frame inside
+    if not ffmpeg or len(cues) < 4:
+        return False
+    pick = [cues[i] for i in np.linspace(0, len(cues) - 1, min(samples, len(cues))).astype(int)]
+    starts, ends = np.array([c[0] for c in cues]), np.array([c[1] for c in cues])
+    controls = []
+    for a, b in pick:  # nearby, so same scene and lighting, but at least 4 s from any line
+        t = next((t for t in (a - 8, b + 8, a - 15, b + 15)
+                  if t > 0 and not np.any((starts - 4 < t) & (ends + 4 > t))), None)
+        if t is not None:
+            controls.append(t)
+    inside = [_text_score(_gray_frame(ffmpeg, video, (a + b) / 2)) for a, b in pick]
+    outside = [_text_score(_gray_frame(ffmpeg, video, t)) for t in controls]
+    # Measured: burned-in Daredevil lines 32-433, clean films almost always under 12 (one stray 96 in 12)
+    floor = max(30, 3 * float(np.median(outside)) if outside else 30)
+    return sum(s > floor for s in inside) >= 0.6 * len(inside)
+
+
+def drop_if_burned_in(video, srt):
+    """Delete the subtitle file and raise BurnedIn when the video already shows those lines."""
+    try:
+        burned = burned_in(video, srt)
+    except Exception:
+        return  # can't tell: keep the subtitles
+    if burned:
+        Path(srt).unlink(missing_ok=True)
+        raise BurnedIn("The foreign dialogue is already subtitled in this video's picture")

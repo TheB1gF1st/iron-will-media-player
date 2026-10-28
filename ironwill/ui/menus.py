@@ -10,7 +10,8 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 
-from ..settings import DATA_DIR
+from ..convert import PRESETS as CONVERT_PRESETS
+from ..settings import DATA_DIR, EQ_PRESETS, VISUALIZERS
 
 
 @dataclass
@@ -80,10 +81,34 @@ def sections(win):
     file_menu = [
         Item("Open File…", win.open_dialog, keys("open")),
         Item("Open Folder…", win.open_folder_dialog),
+        Item("Library…", win.open_library, keys("library")),
+        Item("Open from Network…", win.open_network),
+        Item("Open Capture", children=[Item("Desktop (live)", lambda: win.open_capture("desktop"))] + [
+            Item(f"Camera: {d}", lambda d=d: win.open_capture(d)) for d in win.capture_devices()]),
+        Item("Open DVD / Blu-ray…", win.open_disc),
+        *([Item("Disc Title", children=[
+            Item(f"Title {i + 1}", lambda i=i: win.disc_title(i), checked=_get(m, "disc-title", -1) == i)
+            for i in range(int(_get(m, "disc-titles", 0) or 0))])]
+          if (e.path or "").startswith(("dvd://", "bd://")) else []),
         Item("Recent Files", enabled=bool(recent), children=[
             Item(Path(p).name, lambda p=p: win.open_path(p)) for p in recent] + [
             SEP, Item("Clear list", win.clear_recent)]),
         Item("Close", win.stop, enabled=loaded),
+        SEP,
+        Item("Share to TV (Roku, smart TVs)", win.toggle_share_now, checked=bool(getattr(win, "share_now", False)),
+             enabled=loaded and "://" not in (e.path or "")),
+        Item("Network Sharing Options…", lambda: win.open_options("network")),
+        Item("Cast to Smart TV…", win.cast_menu, enabled=loaded and "://" not in (e.path or "")),
+        *([Item("Casting", children=[
+            Item("Pause on TV", lambda: win.cast_key("pause")),
+            Item("Play on TV", lambda: win.cast_key("play")),
+            Item("Back 10 s on TV", lambda: win.cast_key("back")),
+            Item("Forward 30 s on TV", lambda: win.cast_key("fwd")),
+            Item("Stop Casting", win.stop_cast)])] if getattr(win, "casting", None) else []),
+        Item("Convert", enabled=loaded and "://" not in (e.path or ""), children=[
+            Item(label + "…", lambda k=key: win.convert_current(k)) for key, (label, _x, _a) in CONVERT_PRESETS.items()]),
+        Item("Add to Playlist…", win.add_to_playlist, enabled=loaded),
+        Item("Save Playlist…", win.save_playlist, enabled=loaded),
         SEP,
         Item("Save Image…", win.save_frame, keys("screenshot"), enabled=loaded),
         Item("Save Thumbnails…", win.save_thumbnails, enabled=loaded),
@@ -111,6 +136,8 @@ def sections(win):
              enabled=loaded and (win.loop["a"] is not None or win.loop["b"] is not None)),
     ]
     zoom = [
+        Item("360° View (drag to look around)", lambda: win.toggle_360(), checked=bool(win.view360), enabled=loaded),
+        SEP,
         Item("50%", lambda: win.fit_to_video(0.5), keys("zoom_50"), enabled=loaded),
         Item("100%", lambda: win.fit_to_video(1.0), keys("zoom_100"), enabled=loaded),
         Item("200%", lambda: win.fit_to_video(2.0), keys("zoom_200"), enabled=loaded),
@@ -168,6 +195,12 @@ def sections(win):
             Item(f"{c.get('title') or f'Chapter {i + 1}'}   {_fmt(c.get('time', 0))}",
                  lambda i=i: _set(m, "chapter", i), checked=i == current_chapter)
             for i, c in enumerate(chapters)] or [Item("No chapters", enabled=False)]),
+        SEP,
+        Item("Add Bookmark…", win.add_bookmark, keys("bookmark"), enabled=loaded),
+        Item("Bookmarks", enabled=loaded and bool(win.bookmarks()), children=[
+            Item(f"{b['name']}   {_fmt(b['pos'])}", lambda p=b["pos"]: win.jump_bookmark(p)) for b in win.bookmarks()
+        ] + [SEP, Item("Remove", children=[
+            Item(f"{b['name']}   {_fmt(b['pos'])}", lambda p=b["pos"]: win.remove_bookmark(p)) for b in win.bookmarks()])]),
     ]
     favs = cfg.values.get("favorites", [])
     favorites = [
@@ -196,6 +229,13 @@ def sections(win):
         Item("Even Out Loud and Quiet Scenes", lambda: win.set_prefs({"normalize": not cfg["normalize"]}),
              checked=cfg["normalize"]),
         Item("Night Mode", lambda: win.set_prefs({"night_mode": not cfg["night_mode"]}), checked=cfg["night_mode"]),
+        Item("Equalizer", children=[
+            Item(label, lambda k=key: win.set_prefs({"eq_preset": k}), checked=cfg["eq_preset"] == key)
+            for key, (label, _gains) in EQ_PRESETS.items()
+        ] + [SEP, Item("Custom Bands…", lambda: win.open_options("soundproc"))]),
+        Item("Visualizer", children=[
+            Item(label, lambda k=key: (win.set_prefs({"visualizer": k}), win._apply_visualizer()),
+                 checked=cfg["visualizer"] == key) for key, (label, _g) in VISUALIZERS.items()]),
     ]
     subs_on = bool(_get(m, "sid", False))
     subtitles = [

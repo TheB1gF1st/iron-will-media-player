@@ -7,7 +7,24 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen, QFontMet
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu,
                                QPushButton, QSlider, QVBoxLayout, QWidget)
 
-ACCENT = QColor("#E81123")
+def _saved_accent():
+    """The theme's accent color, read straight from the settings file (widgets load before the config object)."""
+    try:
+        import json
+        from ..settings import CONFIG_FILE
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8")).get("theme_accent") or "#E81123"
+    except Exception:
+        return "#E81123"
+
+
+ACCENT = QColor(_saved_accent())
+
+
+def themed(css):
+    """Swap the stock Iron Will red in a stylesheet for the theme's accent."""
+    a = ACCENT
+    return (css.replace("#E81123", a.name()).replace("#FF4D5B", a.lighter(130).name())
+            .replace("232,17,35", f"{a.red()},{a.green()},{a.blue()}"))
 LOOP = QColor("#FFC23D")  # A-B loop markers: amber, so they never blend into the red progress line
 
 
@@ -404,7 +421,7 @@ class SpeedControl(QWidget):
         pct = round(speed * 100)
         self.value.setText(f"{pct}%")
         # Off normal speed the number turns red, so it's obvious the video isn't at 100%; a click flashes it bright red.
-        color = ACCENT.name() if self.flashing else "white" if pct == 100 else "#FF4D5B"
+        color = ACCENT.name() if self.flashing else "white" if pct == 100 else ACCENT.lighter(130).name()
         self.value.setStyleSheet(f"QPushButton {{ color: {color}; background: transparent; border: none; }}"
                                  "QPushButton:hover { background: rgba(255,255,255,38); }")
 
@@ -512,7 +529,7 @@ class ResumePrompt(QFrame):
         self.over = QPushButton("Start over")
         self.cont = QPushButton("Continue")
         for b, style in ((self.over, "background: rgba(255,255,255,26); border: 1px solid rgba(255,255,255,60);"),
-                         (self.cont, "background: #E81123; border: none;")):
+                         (self.cont, f"background: {ACCENT.name()}; border: none;")):
             b.setFixedSize(130, 40)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)

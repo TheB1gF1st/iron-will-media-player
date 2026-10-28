@@ -14,13 +14,14 @@ from PySide6.QtWidgets import (QFileDialog, QGraphicsOpacityEffect, QHBoxLayout,
                                QMessageBox, QVBoxLayout, QWidget, QApplication, QPushButton)
 
 import threading
+import time
 
 from .. import display, foreign_subs, playlist, taskbar
 from ..engine import PlayerEngine
 from ..settings import LANGUAGES, Config, apply_to_mpv
 from ..video_view import MpvVideoWidget
 from ..resume import ResumeStore
-from .widgets import (CloseOrb, Glyph, IconButton, ResumePrompt, SeekBar, SpeedControl, Toast, VolumeFlyout, dark_menu, fmt_time, ui_font,
+from .widgets import (ACCENT, themed, CloseOrb, Glyph, IconButton, ResumePrompt, SeekBar, SpeedControl, Toast, VolumeFlyout, dark_menu, fmt_time, ui_font,
                       volume_glyph)
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -42,7 +43,8 @@ def log(*args):
         print(*args, file=sys.stderr, flush=True)
 
 
-FILE_FILTER = ("Media files (" + " ".join("*" + e for e in sorted(playlist.MEDIA_EXTS)) + ");;All files (*)")
+FILE_FILTER = ("Media files (" + " ".join("*" + e for e in sorted(playlist.MEDIA_EXTS | playlist.PLAYLIST_EXTS))
+               + " *.iso);;Playlists (*.m3u8 *.m3u);;Disc images (*.iso);;All files (*)")
 
 
 class BottomBar(QWidget):
@@ -197,14 +199,14 @@ class Welcome(QWidget):
         f2 = QFont(fams[0] if fams else "Segoe UI")
         f2.setPixelSize(34)
         f2.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 16)
-        sub = BrandLabel("MEDIA PLAYER", f2, "#E81123")
+        sub = BrandLabel("MEDIA PLAYER", f2, ACCENT.name())
         btn = QPushButton("  Open a file")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn.setFont(ui_font(16, QFont.Weight.DemiBold))
         btn.setFixedSize(220, 48)
-        btn.setStyleSheet("QPushButton { color: white; background: #E81123; border: none; border-radius: 24px; }"
-                          "QPushButton:hover { background: #F0303F; } QPushButton:pressed { background: #C50F1F; }")
+        btn.setStyleSheet(themed("QPushButton { color: white; background: #E81123; border: none; border-radius: 24px; }"
+                          "QPushButton:hover { background: #F0303F; } QPushButton:pressed { background: #C50F1F; }"))
         btn.clicked.connect(on_open)
         hint = QLabel("or drop a video anywhere  ·  Ctrl+O")
         hint.setFont(ui_font(14))
@@ -340,6 +342,11 @@ class MainWindow(QMainWindow):
         self.loaded_ok = False
         self.pending_resume = None
         self.loop = {"a": None, "b": None}  # A-B loop markers (seconds); mpv is told via _sync_ab
+        self.custom_list = None  # files from an opened .m3u: next / previous follow it instead of the folder
+        self.view360 = None  # {"yaw", "pitch", "fov"} while a 360° video is shown as a movable flat view
+        self.drag360_from, self.drag360_moved = None, False
+        self.drag360_timer = QTimer(self, singleShot=True, interval=33)
+        self.drag360_timer.timeout.connect(self._apply_360)
         self.prompt = ResumePrompt(stage)
         self.prompt.chosen.connect(self._resume_choice)
         self.flyout = VolumeFlyout(self)
@@ -453,6 +460,8 @@ class MainWindow(QMainWindow):
         act("speed_down", "Decrease rate", ["Ctrl+Down", "["], lambda: self.step_speed(-1))
         act("speed_reset", "Reset rate", ["Ctrl+R", "Backspace"], lambda: self.set_speed(1.0))
         act("goto", "Go to a time", ["Ctrl+G"], self.go_to_time)
+        act("bookmark", "Add bookmark", ["Ctrl+Shift+B"], self.add_bookmark)
+        act("library", "Library", ["Ctrl+L"], self.open_library)
         self.act_options = act("options", "Options…", ["O", "Ctrl+,"], self.open_options)
         # MPC-BE's shortcuts for the view and zoom menus
         act("properties", "Properties", ["Shift+F10"], self.show_properties)
@@ -602,6 +611,7 @@ class MainWindow(QMainWindow):
     def apply_settings(self):
         """Re-read app-side preferences (mpv-side ones are pushed by settings.apply_to_mpv)."""
         c = self.cfg
+        QTimer.singleShot(0, self.update_share)
         self.hide_timer.setInterval(int(c["hide_delay"] * 1000))
         overrides = c.values.get("keys", {})
         for aid, (a, keys) in self.actions_by_id.items():
@@ -737,6 +747,62 @@ class MainWindow(QMainWindow):
         self._set_loaded(True)
         self.show_chrome()
 
+    # Discs: DVD and Blu-ray (drive, ripped folder or .iso) -------------------------------------------------
+    @staticmethod
+    def disc_kind(source):
+        """'dvd', 'bd' or None for a drive letter, a folder holding VIDEO_TS / BDMV (or that folder itself), or an
+        .iso. An .iso can be either; a Blu-ray image is usually several GB over a single-layer DVD, so try bd first
+        for big ones."""
+        p = Path(source)
+        if p.is_file() and p.suffix.lower() == ".iso":
+            return "bd" if p.stat().st_size > 9_000_000_000 else "dvd"
+        for folder in (p, p.parent):
+            if (folder / "BDMV").is_dir() or folder.name.upper() == "BDMV":
+                return "bd"
+            if (folder / "VIDEO_TS").is_dir() or folder.name.upper() == "VIDEO_TS":
+                return "dvd"
+        return None
+
+    def open_disc(self, source=None):
+        """Play a DVD or Blu-ray. Menus aren't available (the mpv engine dropped disc menus): it plays the main
+        title, and Disc > Title in the menu switches titles. Encrypted retail Blu-rays won't play."""
+        if source is None:
+            source = QFileDialog.getExistingDirectory(self, "Choose the disc drive or the ripped disc folder",
+                                                      self.settings.value("last_disc", ""))
+            if not source:
+                return
+        kind = self.disc_kind(source)
+        if kind is None:
+            self.toast.show_message("No DVD or Blu-ray found there (looking for VIDEO_TS or BDMV)")
+            return
+        p = Path(source)
+        device = str(p.parent if p.name.upper() in ("VIDEO_TS", "BDMV") else p)
+        self.settings.setValue("last_disc", device)
+        self._remember_position(force=True)
+        self.custom_list = None
+        m = self.engine.mpv
+        try:
+            m["dvd-device" if kind == "dvd" else "bluray-device"] = device
+        except Exception as exc:
+            self.toast.show_message(f"This build can't play discs ({exc})")
+            return
+        self.prompt.hide()
+        self.loaded_ok = False
+        self.engine.open(f"{kind}://")  # no title number: the longest title, which is the movie
+        self.loop = {"a": None, "b": None}
+        self._sync_ab()
+        label = p.name if p.suffix.lower() == ".iso" else (Path(device).name or device.rstrip(":\\") + ":")
+        self._set_title(f"{'DVD' if kind == 'dvd' else 'Blu-ray'}: {label}")
+        self._set_loaded(True)
+        self.show_chrome()
+
+    def disc_title(self, n):
+        """Switch to title n on the disc that's playing."""
+        path = self.engine.path or ""
+        kind = path.split("://", 1)[0]
+        if kind in ("dvd", "bd"):
+            self.engine.open(f"{kind}://{n}")
+
     def _seek_menu(self, pos):
         if not self.engine.path:
             return
@@ -813,7 +879,220 @@ class MainWindow(QMainWindow):
         proc.start(ffmpeg, args)
         self.toast.show_message("Saving clip…" if not precise else "Saving clip (re-encoding, this can take a moment)…")
 
+    # Share to TVs (DLNA media server) ----------------------------------------------------------------------
+    def _share_files(self):
+        """What the TV sees: the always-shared folders, plus what's playing now (its playlist or folder)."""
+        files = []
+        if self.cfg["dlna_always"]:
+            for folder in (x.strip() for x in self.cfg["dlna_folders"].split(";")):
+                if folder and Path(folder).is_dir():
+                    files += sorted((p for p in Path(folder).rglob("*") if p.is_file() and playlist.is_media(p)),
+                                    key=lambda p: str(p).lower())
+        if getattr(self, "share_now", False) and self.engine.path and "://" not in self.engine.path:
+            files = (self.custom_list or playlist.siblings(self.engine.path)) + files
+        seen, out = set(), []
+        for f in files:
+            if str(f).lower() not in seen:
+                seen.add(str(f).lower())
+                out.append(Path(f))
+        return out
+
+    def update_share(self):
+        """Start, refresh or stop the media server to match the settings and the Share to TV toggle."""
+        from .. import dlna
+        want = self.cfg["dlna_always"] or getattr(self, "share_now", False)
+        srv = getattr(self, "dlna", None)
+        if not want:
+            if srv:
+                srv.stop()
+                self.dlna = None
+            return
+        if srv and srv.name != self.cfg["dlna_name"]:
+            srv.stop()
+            srv = None
+        if srv is None:
+            try:
+                srv = self.dlna = dlna.Server(self.cfg["dlna_name"] or "Iron Will")
+            except OSError as e:
+                self.toast.show_message(f"Couldn't start sharing ({e})")
+                return
+        # Listing big shared folders can take a moment: do it off the UI thread
+        threading.Thread(target=lambda: srv.set_files(self._share_files()), daemon=True).start()
+
+    def toggle_share_now(self):
+        self.share_now = not getattr(self, "share_now", False)
+        self.update_share()
+        self.toast.show_message(f"Sharing to TVs as \"{self.cfg['dlna_name']}\": open it in Roku Media Player"
+                                if self.share_now else "Stopped sharing what's playing")
+
+    # Capture: webcams and the desktop, shown live ------------------------------------------------------------
+    @staticmethod
+    def capture_devices():
+        """Names of the cameras Windows offers (DirectShow), via the bundled FFmpeg's device list."""
+        import subprocess
+        from ..dupes.fingerprint import find_tool
+        ffmpeg = find_tool("ffmpeg")
+        if not ffmpeg:
+            return []
+        try:
+            out = subprocess.run([ffmpeg, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+                                 capture_output=True, text=True, timeout=8, creationflags=0x08000000).stderr
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        return re.findall(r'"([^"]+)" \(video\)', out)
+
+    def open_capture(self, source):
+        """source: 'desktop' or a camera name. Plays live; there's no end, so seeking is meaningless."""
+        url = "av://gdigrab:desktop" if source == "desktop" else f"av://dshow:video={source}"
+        self._remember_position(force=True)
+        self.custom_list = None
+        self.prompt.hide()
+        self.loaded_ok = False
+        self.engine.open(url)
+        self._set_title("Desktop (live)" if source == "desktop" else f"{source} (live)")
+        self._set_loaded(True)
+        self.show_chrome()
+
+    def open_library(self):
+        from .library import Library
+        Library(self).exec()
+
+    def open_network(self):
+        from .network import NetworkBrowser
+        NetworkBrowser(self).exec()
+
+    def open_network_url(self, url, title):
+        """Play a file from a media server: like Open URL, titled with the server's name for it."""
+        self._remember_position(force=True)
+        self.custom_list = None
+        self.prompt.hide()
+        self.loaded_ok = False
+        self.engine.open(url)
+        self.loop = {"a": None, "b": None}
+        self._sync_ab()
+        self._set_title(title)
+        self._set_loaded(True)
+        self.show_chrome()
+
+    # Cast to a smart TV / console (DLNA renderer) -----------------------------------------------------------
+    def cast_menu(self):
+        """Find TVs that can be told to play (Samsung, LG, Sony, Xbox…) off the UI thread, then offer them."""
+        if not self.engine.path or "://" in self.engine.path:
+            self.toast.show_message("Open a file first, then cast it")
+            return
+        from .. import cast
+        self.toast.show_message("Looking for TVs on your network…")
+        found, done = [], threading.Event()
+
+        def look():
+            try:
+                found.extend(cast.find_renderers())
+            finally:
+                done.set()
+        threading.Thread(target=look, daemon=True).start()
+
+        def show():
+            if not done.is_set():
+                QTimer.singleShot(200, show)
+                return
+            if not found:
+                self.toast.show_message("No smart TV found (Rokus: use Share to TV instead)")
+                return
+            m = dark_menu(self)
+            m.addSection("Cast to")
+            for name, model, ctrl in found:
+                m.addAction(f"{name} · {model}", lambda c=ctrl, n=name: self.start_cast(c, n))
+            m.exec(QCursor.pos())
+        show()
+
+    def start_cast(self, control, name):
+        from .. import cast
+        if getattr(self, "casting", None):
+            self.casting.stop()
+        session = cast.Renderer(control, name)
+        start_at = self.position
+        path = self.engine.path
+
+        def go():  # the TV can take a few seconds to answer: keep the window responsive
+            try:
+                session.play(path)
+                if start_at > 5:
+                    time.sleep(3)
+                    session.seek(start_at)  # carry on from where the PC was
+                QTimer.singleShot(0, lambda: self._cast_started(session, name))
+            except OSError as e:
+                QTimer.singleShot(0, lambda e=e: self.toast.show_message(str(e)))
+        threading.Thread(target=go, daemon=True).start()
+        self.toast.show_message(f"Sending to {name}…")
+
+    def _cast_started(self, session, name):
+        self.casting = session
+        self.engine.mpv.pause = True  # the TV plays it now
+        self.toast.show_message(f"Casting to {name}")
+
+    def cast_key(self, key):
+        s = getattr(self, "casting", None)
+        if not s:
+            return
+        if key == "pause":
+            s.pause()
+        elif key == "play":
+            s.resume()
+        elif key in ("back", "fwd"):
+            pos, _dur = s.position()
+            if pos is not None:
+                s.seek(pos + (-10 if key == "back" else 30))
+
+    def stop_cast(self):
+        if getattr(self, "casting", None):
+            self.casting.stop()
+            self.casting = None
+            self.toast.show_message("Stopped casting")
+
+    def convert_current(self, preset):
+        """File > Convert: write the playing file in another format with FFmpeg, showing the percentage."""
+        from PySide6.QtCore import QProcess
+        from .. import convert
+        from ..dupes.fingerprint import find_tool
+        src = self.engine.path
+        if not src or "://" in src:
+            return
+        ffmpeg = find_tool("ffmpeg")
+        if not ffmpeg:
+            self.toast.show_message("FFmpeg wasn't found")
+            return
+        label, ext, _args = convert.PRESETS[preset]
+        start = Path(src).with_name(f"{Path(src).stem} (converted){ext}")
+        dest, _ = QFileDialog.getSaveFileName(self, f"Convert: {label}", str(start), f"*{ext}")
+        if not dest:
+            return
+        if Path(dest).resolve() == Path(src).resolve():
+            self.toast.show_message("Pick a different name: the original file is never overwritten")
+            return
+        proc = QProcess(self)
+        self.convert_procs = getattr(self, "convert_procs", []) + [proc]
+        duration, name = self.duration, Path(dest).name
+
+        def progress():
+            pct = convert.parse_progress(bytes(proc.readAllStandardOutput()).decode(errors="replace"), duration)
+            if pct is not None:
+                self.toast.show_message(f"Converting {name}… {pct}%")
+
+        def done(code, _status):
+            self.convert_procs.remove(proc)
+            ok = code == 0 and Path(dest).exists() and Path(dest).stat().st_size > 0
+            self.toast.show_message(f"Converted: {name}" if ok else f"Couldn't convert ({name})")
+            if not ok:
+                log("convert failed:", bytes(proc.readAllStandardError()).decode(errors="replace")[:500])
+        proc.readyReadStandardOutput.connect(progress)
+        proc.finished.connect(done)
+        proc.start(ffmpeg, convert.ffmpeg_args(src, dest, preset))
+        self.toast.show_message(f"Converting to {name}…")
+
     def _on_load_failed(self, path):
+        if (path or "").startswith(("dvd://", "bd://")):
+            self.toast.show_message("Couldn't read that disc (damaged, or an encrypted retail Blu-ray)")
+            return
         self.toast.show_message(f"Couldn't open {Path(path).name}")
         if self.cfg["next_on_error"] and path and "://" not in path:
             QTimer.singleShot(600, lambda: self.play_neighbor(1))
@@ -1149,6 +1428,9 @@ class MainWindow(QMainWindow):
             m.command("vf", "remove", "hflip")
         except Exception:
             pass
+        if self.view360:  # Reset should always get back to a normal picture, 360° view included
+            self.view360 = None
+            self._apply_360()
         self.toast.show_message("View reset")
 
     def add_favorite(self):
@@ -1158,6 +1440,38 @@ class MainWindow(QMainWindow):
         favs.append({"path": self.engine.path, "pos": round(self.position, 1), "name": Path(self.engine.path).stem})
         self.set_prefs({"favorites": favs})
         self.toast.show_message(f"Added to Favorites at {fmt_time(self.position)}")
+
+    # Bookmarks: named spots inside one file ---------------------------------------------------------------
+    def bookmarks(self):
+        marks = self.cfg.values.get("bookmarks", {})
+        return sorted(marks.get(str(self.engine.path or "").lower(), []), key=lambda b: b["pos"])
+
+    def add_bookmark(self):
+        if not self.engine.path:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        pos = round(self.position, 1)
+        name, ok = QInputDialog.getText(self, "Add bookmark", f"Name for {fmt_time(pos)}:", text=fmt_time(pos))
+        if not ok:
+            return
+        marks = dict(self.cfg.values.get("bookmarks", {}))
+        key = str(self.engine.path).lower()
+        marks[key] = [b for b in marks.get(key, []) if abs(b["pos"] - pos) > 0.5] + [
+            {"pos": pos, "name": name.strip() or fmt_time(pos)}]
+        self.set_prefs({"bookmarks": marks})
+        self.toast.show_message(f"Bookmarked {fmt_time(pos)}")
+
+    def jump_bookmark(self, pos):
+        self.engine.seek(pos)
+        self.toast.show_message(f"Bookmark {fmt_time(pos)}")
+
+    def remove_bookmark(self, pos):
+        marks = dict(self.cfg.values.get("bookmarks", {}))
+        key = str(self.engine.path or "").lower()
+        marks[key] = [b for b in marks.get(key, []) if b["pos"] != pos]
+        if not marks[key]:
+            marks.pop(key)
+        self.set_prefs({"bookmarks": marks})
 
     def remove_favorite(self, index):
         favs = list(self.cfg.values.get("favorites", []))
@@ -1239,8 +1553,9 @@ class MainWindow(QMainWindow):
         self.finder.activateWindow()
 
     def show_about(self):
+        from .. import __version__
         QMessageBox.about(self, "Iron Will Media Player",
-                          "<b>Iron Will Media Player</b><br>I will play anything.<br><br>"
+                          f"<b>Iron Will Media Player</b> {__version__}<br>I will play anything.<br><br>"
                           f"Built on mpv {str(self.engine.mpv._get_property('mpv-version') or '').replace('mpv ', '')}"
                           " and Qt.")
 
@@ -1276,6 +1591,12 @@ class MainWindow(QMainWindow):
         """browsing=True: reached with next / previous or at the end of a file, so it starts from the beginning
         without the Continue / Start over card (that card is only for files you open yourself)."""
         path = Path(path)
+        if playlist.is_playlist(path):
+            return self.open_playlist(path)
+        if path.suffix.lower() == ".iso" or (path.is_dir() and self.disc_kind(path)):
+            return self.open_disc(path)
+        if self.custom_list and str(path).lower() not in {str(f).lower() for f in self.custom_list}:
+            self.custom_list = None  # a file from outside the playlist: back to the folder
         if path.suffix.lower() in SUB_EXTS and self.engine.path:
             self.engine.mpv.command("sub-add", str(path), "select")
             self.toast.show_message(f"Subtitles: {path.name}")
@@ -1309,6 +1630,8 @@ class MainWindow(QMainWindow):
         self._set_title(path.stem)
         self._set_loaded(True)
         self.show_chrome()
+        if getattr(self, "share_now", False):
+            self.update_share()  # the TV follows to the new folder / playlist
         if self.cfg["start_fullscreen"] and not self.isFullScreen() and self.mini_geometry is None:
             self.toggle_fullscreen()
 
@@ -1343,6 +1666,13 @@ class MainWindow(QMainWindow):
         path = self.engine.path
         if not path or "://" in path:
             return None
+        if self.custom_list:
+            names = [str(f).lower() for f in self.custom_list]
+            if str(Path(path)).lower() in names:
+                j = names.index(str(Path(path)).lower()) + step
+                if self.cfg["after_playback"] == "next_loop":
+                    j %= len(names)
+                return self.custom_list[j] if 0 <= j < len(names) else None
         nxt = playlist.neighbor(path, step, spec)
         if nxt is None and self.cfg["after_playback"] == "next_loop":
             files = playlist.siblings(path, spec)
@@ -1357,7 +1687,51 @@ class MainWindow(QMainWindow):
         if nxt:
             self.open_path(nxt, browsing=True)
         else:
-            self.toast.show_message("End of folder" if step > 0 else "First in folder")
+            where = "playlist" if self.custom_list else "folder"
+            self.toast.show_message(f"End of {where}" if step > 0 else f"First in {where}")
+
+    # Playlists (.m3u / .m3u8) -----------------------------------------------------------------------------
+    def open_playlist(self, path):
+        try:
+            files = playlist.read_m3u(path)
+        except OSError:
+            files = []
+        if not files:
+            self.toast.show_message("That playlist has no files that can be found")
+            return
+        self.custom_list = files
+        self._add_recent(Path(path))
+        self.open_path(files[0])
+        self.toast.show_message(f"Playlist: {Path(path).stem} ({len(files)} files)")
+
+    def save_playlist(self):
+        """Save the playlist that's playing, or else this folder in its current order, as a .m3u8."""
+        files = self.custom_list or (playlist.siblings(self.engine.path, self.folder_sort(Path(self.engine.path).parent))
+                                     if self.engine.path and "://" not in self.engine.path else [])
+        if not files:
+            return
+        start = str(Path(self.engine.path).parent / "Playlist.m3u8")
+        path, _ = QFileDialog.getSaveFileName(self, "Save playlist", start, "Playlist (*.m3u8)")
+        if path:
+            playlist.write_m3u(path, files)
+            self.toast.show_message(f"Saved {len(files)} files to {Path(path).name}")
+
+    def add_to_playlist(self):
+        """Add the file that's playing to the end of a playlist (a new one if the name doesn't exist yet)."""
+        if not self.engine.path or "://" in self.engine.path:
+            return
+        start = self.settings.value("last_playlist", str(Path(self.engine.path).parent / "Playlist.m3u8"))
+        path, _ = QFileDialog.getSaveFileName(self, "Add to playlist", start, "Playlist (*.m3u8 *.m3u)",
+                                              options=QFileDialog.Option.DontConfirmOverwrite)
+        if not path:
+            return
+        files = playlist.read_m3u(path) if Path(path).exists() else []
+        current = Path(self.engine.path)
+        if str(current).lower() not in {str(f).lower() for f in files}:
+            files.append(current)
+        playlist.write_m3u(path, files)
+        self.settings.setValue("last_playlist", path)
+        self.toast.show_message(f"Added to {Path(path).name} ({len(files)} files)")
 
     def _set_loaded(self, loaded):
         self.welcome.setVisible(not loaded)
@@ -1464,6 +1838,81 @@ class MainWindow(QMainWindow):
         self.settings.setValue("volume", v)
         self.settings.setValue("mute", muted)
 
+    # 360° video: show a window into the sphere; drag to look around, wheel to zoom ----------------------------
+    def toggle_360(self, on=None):
+        on = (self.view360 is None) if on is None else on
+        self.view360 = {"yaw": 0.0, "pitch": 0.0, "fov": 100.0} if on else None
+        self._apply_360()
+        self.toast.show_message("360° view: drag to look around, scroll to zoom" if on else "360° view off")
+
+    def _detect_360(self):
+        """Turn the 360° view on only for files named as 360° video ("360", "vr360", "equirect" in the name).
+
+        A 2:1 shape is NOT enough: plenty of shows and films are 2.00:1 widescreen (e.g. 3840x1920), and treating
+        them as 360° showed a cropped, zoomed-in picture that Zoom Out and Reset couldn't undo. Resolution tags
+        ("360p"), longer numbers ("1360") and "Xbox 360" don't count. Real 360° files with other names can still
+        use Zoom > 360° View."""
+        name = Path(self.engine.path or "").stem.lower()
+        is360 = ("vr360" in name or "equirect" in name
+                 or (re.search(r"(?<!\d)360(?![\dpi])", name) is not None and not re.search(r"xbox[\s._-]*360", name)))
+        if is360 and not self.view360:
+            self.toggle_360(True)
+        elif not is360 and self.view360:
+            self.view360 = None
+            self._apply_360()
+
+    def _apply_360(self):
+        m = self.engine.mpv
+        try:
+            m.command("vf", "remove", "@v360")
+        except Exception:
+            pass
+        v = self.view360
+        if not v:
+            return
+        w, h = 1920, 1080
+        vfov = v["fov"] * h / w
+        try:
+            m.command("vf", "add", f"@v360:v360=input=e:output=flat:h_fov={v['fov']:.1f}:v_fov={vfov:.1f}"
+                                   f":yaw={v['yaw']:.1f}:pitch={v['pitch']:.1f}:w={w}:h={h}:interp=linear")
+        except Exception as exc:
+            log("360:", exc)
+
+    def _drag_360(self, pos):
+        if self.drag360_from is None:
+            self.drag360_from = pos
+            self.longpress_timer.stop()
+            return
+        d = pos - self.drag360_from
+        if d.manhattanLength() < 3:
+            return
+        self.drag360_from = pos
+        self.press_pos = pos  # keep tracking, but a drag isn't a click: cleared on release below
+        self.drag360_moved = True
+        scale = self.view360["fov"] / max(1, self.video.width())
+        self.view360["yaw"] = (self.view360["yaw"] - d.x() * scale + 180) % 360 - 180
+        self.view360["pitch"] = max(-90, min(90, self.view360["pitch"] + d.y() * scale))
+        if not self.drag360_timer.isActive():
+            self.drag360_timer.start()  # at most ~30 updates a second
+
+    def _apply_visualizer(self):
+        """Music files with no picture get the chosen visualizer; anything with real video (or cover art) doesn't."""
+        from ..settings import VISUALIZERS
+        m = self.engine.mpv
+        try:
+            tracks = m._get_property("track-list") or []
+        except Exception:
+            return
+        picture = any(t.get("type") == "video" for t in tracks)
+        audio = any(t.get("type") == "audio" for t in tracks)
+        graph = VISUALIZERS.get(self.cfg["visualizer"], VISUALIZERS["off"])[1]
+        want = f"[aid1]asplit[ao][a];{graph};[v]format=yuv420p[vo]" if graph and audio and not picture else ""
+        try:
+            if (m._get_property("lavfi-complex") or "") != want:
+                m["lavfi-complex"] = want
+        except Exception as exc:
+            log("visualizer:", exc)
+
     def _on_loaded(self, path):
         self.loaded_ok = path == self.engine.path
         self._update_neighbors()
@@ -1475,6 +1924,8 @@ class MainWindow(QMainWindow):
         self._force_foreign_subs()
         self._auto_find_foreign_subs()
         self._apply_video_zoom()
+        self._apply_visualizer()
+        self._detect_360()
         try:
             chapters = [c.get("time", 0) for c in (self.engine.mpv._get_property("chapter-list") or [])]
         except Exception:
@@ -1485,7 +1936,16 @@ class MainWindow(QMainWindow):
         if self.cfg["osd_filename"]:
             self.toast.show_message(Path(path).name)
 
+    def _subs_off_files(self):
+        return set(self.settings.value("subs_turned_off", []) or [])
+
     def _save_tracks(self, kind, track_id):
+        if kind == "sub" and self.engine.path:
+            # Subtitles turned off by hand stay off for this file, even the foreign-dialogue ones: some videos
+            # have those burned into the picture, and a downloaded copy on top shows every line twice.
+            off, key = self._subs_off_files(), self.engine.path.lower()
+            off = off | {key} if track_id is None else off - {key}
+            self.settings.setValue("subs_turned_off", list(off)[-2000:])
         if not (self.cfg["remember_tracks"] and self.engine.path and kind in ("audio", "sub")):
             return
         saved = dict(self.settings.value("tracks", {}) or {})
@@ -1539,7 +1999,7 @@ class MainWindow(QMainWindow):
             current = self.engine.mpv.sid
         except Exception:
             current = None
-        if current not in (None, False, "no"):
+        if current not in (None, False, "no") or self.engine.path.lower() in self._subs_off_files():
             return
         want = self._sub_lang()
         tracks = [t for t in self.engine.tracks("sub")
@@ -1607,9 +2067,9 @@ class MainWindow(QMainWindow):
                         except foreign_subs.SubsError as e:
                             if str(e).startswith("Couldn't reach"):
                                 raise
-                            errors.append(str(e))
+                            errors.append(e)
                     if not paths:
-                        raise foreign_subs.SubsError(errors[0] if errors else "Nothing found online")
+                        raise errors[0] if errors else foreign_subs.SubsError("Nothing found online")
                     note = "Downloaded " + " and ".join(notes) + " from OpenSubtitles"
                     if left is not None:
                         note += f" ({left} downloads left today)"
@@ -1629,7 +2089,7 @@ class MainWindow(QMainWindow):
                     bridge.done.emit(video, None, "!none", False)  # searched, nothing there: don't ask every time
                     return
                 # "?" at the start: a manual online search found nothing, so offer the offline scan instead
-                ask = online and not quiet and foreign_subs.whisper_available()
+                ask = online and not quiet and foreign_subs.whisper_available()                     and not isinstance(e, foreign_subs.BurnedIn)
                 bridge.done.emit(video, None, ("?" if ask else "") + ("" if quiet else str(e)), False)
 
         if not online:
@@ -1665,7 +2125,11 @@ class MainWindow(QMainWindow):
             self._force_foreign_subs()
 
     def _auto_find_foreign_subs(self):
+        if "://" in (self.engine.path or ""):
+            return  # dvd://, bd://, network streams: not a file, so no OpenSubtitles hash and no Whisper scan
         if not (self.cfg["force_foreign_subs"] or "full" in self._wanted_subs()):
+            return
+        if self.engine.path.lower() in self._subs_off_files():
             return
         missing = self._missing_subs()
         if not missing:
@@ -2043,6 +2507,9 @@ class MainWindow(QMainWindow):
         log("hide_chrome path=%s paused=%s flyout=%s" % (bool(self.engine.path), self.paused, self.flyout.isVisible()))
         if not self.engine.path or self.flyout.isVisible() or self.prompt.isVisible():
             return
+        if QApplication.activePopupWidget():  # a menu is open (subtitles, speed…): hiding would close it mid-choice
+            self.hide_timer.start()
+            return
         for w in (self.bar, self.caption):
             if w.isVisible() and w.rect().contains(w.mapFromGlobal(self.cursor().pos())):
                 self.hide_timer.start()
@@ -2157,6 +2624,8 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, ev):
         t = ev.type()
+        if t == QEvent.Type.KeyPress and self._space_fallback(obj, ev):
+            return True
         if t == QEvent.Type.Resize and obj is self.stage:
             # The video area can change size without the window resizing (menu bar shown/hidden, border on/off):
             # re-fit the video and controls to it every time, or they'd sit short with a black strip below.
@@ -2185,7 +2654,10 @@ class MainWindow(QMainWindow):
             # Drag-to-move is checked on every move the video gets: the same movement reaches the window first,
             # so the "only real movement" check below would otherwise swallow it before the video sees it.
             if obj is self.video and self.press_pos is not None and ev.buttons() & Qt.MouseButton.LeftButton:
-                self._maybe_drag_window(pos)
+                if self.view360:
+                    self._drag_360(pos)
+                else:
+                    self._maybe_drag_window(pos)
             if pos != self.last_mouse:
                 self.last_mouse = pos
                 log("mousemove", type(obj).__name__)
@@ -2197,6 +2669,26 @@ class MainWindow(QMainWindow):
             if handled:
                 return True
         return super().eventFilter(obj, ev)
+
+    def _space_fallback(self, obj, ev):
+        """Space must pause and play whatever part of the window has the keyboard. The shortcut normally catches
+        it before any widget does; a key press only arrives here when some widget swallowed the shortcut (seen
+        after 40 minutes of full screen), so handle it ourselves. Text boxes keep their spaces."""
+        from PySide6.QtWidgets import (QAbstractSpinBox, QComboBox, QKeySequenceEdit, QLineEdit, QPlainTextEdit,
+                                       QTextEdit)
+        if ev.key() != Qt.Key.Key_Space or ev.modifiers() & ~Qt.KeyboardModifier.KeypadModifier or ev.isAutoRepeat():
+            return False
+        if not isinstance(obj, QWidget) or obj.window() is not self or QApplication.activePopupWidget():
+            return False
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox, QKeySequenceEdit)):
+            return False
+        action, _keys = self.actions_by_id["play_pause"]
+        if not any(s.matches(QKeySequence("Space")) == QKeySequence.SequenceMatch.ExactMatch for s in action.shortcuts()):
+            return False  # the user moved play/pause off Space
+        log("space fallback, focus was", type(focus).__name__)
+        self.play_pause()
+        return True
 
     # Mouse over the video (MPC-BE-style bindings) ------------------------------------------------------
     def _slot(self, gesture, ev):
@@ -2239,9 +2731,10 @@ class MainWindow(QMainWindow):
                 self.longpress_timer.stop()
                 if self.boost_speed is not None or self.rewinding:  # end of a hold (fast-forward / rewind): not a click
                     self._end_hold()
-                elif self.press_pos is not None:
+                elif self.press_pos is not None and not self.drag360_moved:
                     self.run_command(self._slot("left_click", ev))
                 self.press_pos = None
+                self.drag360_from, self.drag360_moved = None, False
             elif b == Btn.RightButton:
                 self.right_down = False
                 if not self.right_used:
@@ -2258,6 +2751,10 @@ class MainWindow(QMainWindow):
                 self.longpress_timer.stop()
             elif ev.button() in (Btn.MiddleButton, Btn.BackButton, Btn.ForwardButton):
                 return self._video_mouse(E.MouseButtonPress, ev)  # fast repeat presses count as presses
+            return True
+        if t == E.Wheel and self.view360:
+            self.view360["fov"] = max(40, min(140, self.view360["fov"] - ev.angleDelta().y() / 24))
+            self._apply_360()
             return True
         if t == E.Wheel:
             d = ev.angleDelta()
@@ -2466,6 +2963,10 @@ class MainWindow(QMainWindow):
         self._layout()
 
     def closeEvent(self, e):
+        if getattr(self, "dlna", None):
+            self.dlna.stop()
+        if getattr(self, "casting", None):
+            self.casting.stop()
         self._keep_awake(False)
         self._remember_position(force=True)
         if self.mini_geometry is not None:

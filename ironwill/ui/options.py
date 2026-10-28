@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColo
 from .. import import_mpcbe
 from ..settings import ALL, DATA_DIR, DEFAULT_MOUSE, GESTURES, MOUSE_COMMANDS, PAGES, apply_to_mpv, defaults
 
+from .widgets import themed
+
 STYLE = """
 QDialog { background: #171717; }
 QWidget { color: #EDEDED; font-family: 'Segoe UI'; font-size: 13px; }
@@ -102,7 +104,7 @@ class OptionsDialog(QDialog):
         super().__init__(window)
         self.win, self.cfg, self.engine = window, window.cfg, window.engine
         self.setWindowTitle("Options")
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(themed(STYLE))
         self.resize(980, 720)
         self.fields = {}  # key -> (getter, setter)
         self.page_keys = {}  # page id -> [keys]
@@ -122,8 +124,8 @@ class OptionsDialog(QDialog):
         self.header.setObjectName("header")
         accent = QFrame()
         accent.setFixedHeight(3)
-        accent.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #E81123, stop:1 transparent);"
-                             " border-radius: 1px;")
+        accent.setStyleSheet(themed("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #E81123, stop:1 transparent);"
+                                    " border-radius: 1px;"))
         right.addWidget(self.header)
         right.addWidget(accent)
         right.addWidget(self.stack, 1)
@@ -641,7 +643,7 @@ class OptionsDialog(QDialog):
                "\n\nYour MPC-BE settings file is only read, never changed.")
         box = QMessageBox(QMessageBox.Icon.Question, "Import from MPC-BE", msg,
                           QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, self)
-        box.setStyleSheet(STYLE)
+        box.setStyleSheet(themed(STYLE))
         if box.exec() == QMessageBox.StandardButton.Ok:
             current = self._collect()
             current.update(changes)

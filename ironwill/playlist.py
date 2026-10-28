@@ -117,6 +117,44 @@ def neighbor(path, step, spec=NAME_SORT):
     return files[j] if 0 <= j < len(files) else None
 
 
+PLAYLIST_EXTS = {".m3u", ".m3u8"}
+
+
+def is_playlist(path):
+    return Path(path).suffix.lower() in PLAYLIST_EXTS
+
+
+def read_m3u(path):
+    """The media files a .m3u / .m3u8 lists, in order. Relative entries are relative to the playlist's folder;
+    #comment lines (#EXTM3U, #EXTINF) are skipped, and so are entries that no longer exist."""
+    path = Path(path)
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("mbcs" if os.name == "nt" else "latin-1", errors="replace")  # old .m3u: ANSI
+    files = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.lower().startswith("file:///"):
+            from urllib.parse import unquote
+            line = unquote(line[8:])
+        p = Path(line)
+        if not p.is_absolute():
+            p = path.parent / p
+        if p.is_file():
+            files.append(p)
+    return files
+
+
+def write_m3u(path, files):
+    """Save files as a .m3u8 (UTF-8, full paths) that VLC, MPC-BE and Windows players can open too."""
+    lines = ["#EXTM3U"] + [f"#EXTINF:-1,{Path(f).stem}\n{Path(f)}" for f in files]
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def describe(spec):
     """'prop:-System.DateModified;' -> 'Date modified, newest first' (for messages)."""
     prop, desc = parse_sort(spec)[0]

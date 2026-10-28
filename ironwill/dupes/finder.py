@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFileDialo
                                QTreeWidgetItem, QVBoxLayout)
 
 from ..ui.options import STYLE
-from ..ui.widgets import fmt_time
+from ..ui.widgets import fmt_time, themed
 from .scanner import Scanner
 from .store import Store
 from .trash import recycle
@@ -44,7 +44,7 @@ class FinderWindow(QDialog):
         self.win, self.cfg = win, win.cfg
         self.setWindowTitle("Find Duplicates - Iron Will")
         self.setWindowIcon(win.windowIcon())
-        self.setStyleSheet(EXTRA)
+        self.setStyleSheet(themed(EXTRA))
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowMinimizeButtonHint |
                             Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
         win.destroyed.connect(self.close)
@@ -349,7 +349,7 @@ class FinderWindow(QDialog):
                           f"Move {len(checked)} file(s) ({_size(total)}) to the Recycle Bin?\n\n"
                           f"You can restore them from the Recycle Bin if you change your mind.{warn}",
                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, self)
-        box.setStyleSheet(EXTRA)
+        box.setStyleSheet(themed(EXTRA))
         if box.exec() != QMessageBox.StandardButton.Yes:
             return
         paths = [self.groups[gi].members[mi].fp.path for gi, mi, _ in checked]

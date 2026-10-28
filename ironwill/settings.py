@@ -60,6 +60,50 @@ LANG_CHOICES = [("", "File's default (no preference)"), ("en", "English"), ("ja"
 YES_NO = lambda v: "yes" if v else "no"
 MIB = lambda v: f"{int(v)}MiB"
 
+# Ten octave bands, like VLC's equalizer, and presets as dB per band (None = use the custom sliders)
+EQ_BANDS = [(31, "31 Hz"), (62, "62 Hz"), (125, "125 Hz"), (250, "250 Hz"), (500, "500 Hz"), (1000, "1 kHz"),
+            (2000, "2 kHz"), (4000, "4 kHz"), (8000, "8 kHz"), (16000, "16 kHz")]
+EQ_PRESETS = {
+    "off": ("Off", [0] * 10),
+    "custom": ("Custom", None),
+    "bass": ("Bass boost", [7, 6, 5, 3, 1, 0, 0, 0, 0, 0]),
+    "bass_cut": ("Less bass", [-6, -5, -4, -2, 0, 0, 0, 0, 0, 0]),
+    "treble": ("Treble boost", [0, 0, 0, 0, 0, 0, 2, 4, 6, 7]),
+    "dialogue": ("Movie dialogue (clearer voices)", [-3, -2, -1, 0, 2, 4, 4, 3, 1, 0]),
+    "vocal": ("Vocal", [-2, -1, 0, 2, 4, 4, 3, 1, 0, -1]),
+    "rock": ("Rock", [5, 4, 2, -1, -2, -1, 2, 4, 5, 5]),
+    "pop": ("Pop", [-1, 1, 3, 4, 3, 0, -1, -1, 1, 2]),
+    "club": ("Club", [0, 0, 3, 4, 4, 4, 3, 0, 0, 0]),
+    "laptop": ("Small speakers / laptop", [6, 5, 3, 1, 0, 0, 1, 3, 4, 3]),
+    "headphones": ("Headphones", [3, 2, 1, 0, -1, 0, 1, 2, 3, 2]),
+}
+EQ_KEYS = {"eq_preset", *[f"eq_{hz}" for hz, _ in EQ_BANDS]}
+
+# Music visualizers: an FFmpeg filter that turns the audio into a picture (lavfi-complex), shown for audio-only files
+VISUALIZERS = {  # each graph reads the music as [a] and draws [v]
+    "off": ("Off", ""),
+    "spectrum": ("Spectrum (piano roll)", "[a]showcqt=s=1280x720:bar_g=2:sono_g=4[v]"),
+    "spiral": ("Psychedelic spiral", "nullsrc=s=640x360:r=30,geq=lum='128+127*sin(9*atan2(Y-180,X-320)+hypot(X-320,Y-180)/9-T*4+3*sin(hypot(X-320,Y-180)/40-T*2))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=640x360:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=10[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.7:s=1.5,scale=1280:720[v]"),
+    "liquid": ("Liquid colors", "nullsrc=s=480x270:r=30,geq=lum='128+127*sin(3.2*(sin(X/41+T*0.9)+sin((X+Y)/57-T*0.7)+sin(hypot(X-240,Y-135)/23+T*1.3)+sin(Y/31+sin(X/47+T))))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.4:s=1.4,scale=1280:720[v]"),
+    "sun": ("Zigzag sunburst", "nullsrc=s=640x360:r=30,geq=lum='128+127*sin(hypot(X-320,Y-180)/6-T*5+2.2*abs(sin(14*atan2(Y-180,X-320))))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=640x360:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=10[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=cool,hue=H=t*0.3:s=1.6,scale=1280:720[v]"),
+    "rings": ("Pulsing rings", "nullsrc=s=640x360:r=30,geq=lum='128+127*sin(hypot(X-320,Y-180)/5-T*6)*cos(10*atan2(Y-180,X-320)+T)':cb=128:cr=128,format=gray[pl];[a]showcqt=s=640x360:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=10[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=magma,hue=H=t*0.5:s=1.8,scale=1280:720[v]"),
+    "kalei": ("Kaleidoscope", "nullsrc=s=640x360:r=30,geq=lum='128+127*sin(6*cos(6*atan2(Y-180,X-320))+hypot(X-320,Y-180)/14-T*3)*sin(abs(cos(3*atan2(Y-180,X-320)))*hypot(X-320,Y-180)/10+T*2)':cb=128:cr=128,format=gray[pl];[a]showcqt=s=640x360:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=10[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.8:s=1.6,scale=1280:720[v]"),
+    "iris": ("Living iris", "nullsrc=s=640x360:r=30,geq=lum='if(lt(hypot(X-320,Y-180),48+10*sin(T*2)),8,if(lt(hypot(X-320,Y-180),165),150+70*sin(37*atan2(Y-180,X-320)+3*sin(hypot(X-320,Y-180)/9-T*1.5))*sin(11*atan2(Y-180,X-320)-T)*(1-(hypot(X-320,Y-180)-48)/150)+40*sin(hypot(X-320,Y-180)/6-T*3),if(lt(hypot(X-320,Y-180),178),20,4)))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=640x360:sono_v=0:bar_v=12:axis=0,format=gray,gblur=sigma=14[cq];[pl][cq]blend=all_mode=screen,format=yuv444p,pseudocolor=preset=inferno,hue=H=t*0.35:s=1.5,scale=1280:720[v]"),
+    "cosmic": ("Cosmic eye", "nullsrc=s=640x360:r=30,geq=lum='if(lt(hypot(X-320,Y-180),40+8*sin(T*2)),max(0,230*exp(-(pow(X-372,2)/500+pow(Y-128,2)/220))),if(lt(hypot(X-320,Y-180),165),min(255,(110+90*sin(2*atan2(Y-180,X-320)+hypot(X-320,Y-180)/14-T*0.8)*exp(-hypot(X-320,Y-180)/140))+255*gt(mod(sin(X*12.9898+Y*78.233)*43758.5453,1),0.985+0.01*sin(T*3+X))+230*exp(-(pow(X-372,2)/500+pow(Y-128,2)/220))),if(lt(hypot(X-320,Y-180),176),30,max(0,6+255*gt(mod(sin(X*12.9898+Y*78.233)*43758.5453,1),0.985+0.01*sin(T*3+X))*0.3))))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=640x360:sono_v=0:bar_v=10:axis=0,format=gray,gblur=sigma=16[cq];[pl][cq]blend=all_mode=screen,format=yuv444p,pseudocolor=preset=magma,hue=H=t*0.3:s=1.6,scale=1280:720[v]"),
+    "fire": ("Rainbow fire", "nullsrc=s=480x270:r=30,geq=lum='clip(pow(Y/270,1.4)*330*(0.5+0.5*sin(X/13+2.5*sin((Y+T*140)/27)))*(0.6+0.4*sin(X/37-T*2+1.5*sin((Y+T*90)/41))),0,255)':cb=128:cr=128,format=gray,gblur=sigma=3[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=inferno,hue=H=t*0.5:s=1.5,scale=1280:720[v]"),
+    "storm": ("Lightning storm", "nullsrc=s=480x270:r=30,geq=lum='clip(18+18*sin(X/40+T)*sin(Y/30-T*0.7)+255*exp(-pow(X-240-70*sin(Y/13+floor(T*3)*3.1)-25*sin(Y/4+floor(T*3)*7),2)/10)*gt(sin(T*9),-0.3)+60*exp(-pow(X-240-70*sin(Y/13+floor(T*3)*3.1),2)/900)*gt(sin(T*9),-0.3),0,255)':cb=128:cr=128,format=gray,gblur=sigma=1[v0];[a]showcqt=s=480x270:sono_v=0:bar_v=8:axis=0,format=gray,gblur=sigma=12[cq];[v0][cq]blend=all_mode=lighten,format=yuv444p,pseudocolor=preset=cool,hue=H=t*0.4:s=1.4,scale=1280:720[v]"),
+    "smoke": ("Color smoke", "nullsrc=s=480x270:r=30,geq=lum='128+60*sin(X/29+sin(Y/23+T)*2)+60*sin(Y/19+T*1.4+sin(X/31-T)*2)':cb=128:cr=128,format=gray,gblur=sigma=6[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[pl][cq]blend=all_mode=screen,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.6:s=1.2,eq=contrast=1.3,scale=1280:720[v]"),
+    "twist": ("Twisting tunnel", "nullsrc=s=480x270:r=30,geq=lum='255*gt(sin(14*log(max(abs(X-240),abs(Y-135))+1)-T*4+2*atan2(Y-135,X-240)),0)':cb=128:cr=128,format=gray,gblur=sigma=1.5[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=viridis,hue=H=t*0.3:s=1.8,scale=1280:720[v]"),
+    "rsun": ("Rainbow sunburst", "nullsrc=s=480x270:r=30,geq=lum='if(lt(hypot(X-240,Y-135),30+6*sin(T*3)),0,clip(128+127*sin(hypot(X-240,Y-135)/4-T*6+1.6*abs(sin(24*atan2(Y-135,X-240)))),0,255))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.9:s=1.7,scale=1280:720[v]"),
+    "warp": ("Warp speed", "nullsrc=s=480x270:r=30,geq=lum='clip(700*pow(abs(sin(40*atan2(Y-135,X-240)+3*sin(T))),30)*mod(hypot(X-240,Y-135)/60-T*1.5,1)*gt(hypot(X-240,Y-135),8),0,255)':cb=128:cr=128,format=gray,gblur=sigma=1.2[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[cq]curves=all='0/0 1/0.35'[cqd];[pl][cqd]blend=all_mode=lighten,format=yuv444p,pseudocolor=preset=plasma,hue=H=t*0.6:s=1.6,scale=1280:720[v]"),
+    "plasma": ("Plasma", "nullsrc=s=480x270:r=30,geq=lum='128+32*(sin(X/16+T)+sin(Y/12-T*1.3)+sin((X+Y)/20+T*0.7)+sin(hypot(X-240,Y-135)/10-T*2))':cb=128:cr=128,format=gray[pl];[a]showcqt=s=480x270:sono_v=0:bar_v=20:axis=0,format=gray,gblur=sigma=8[cq];[pl][cq]blend=all_mode=addition,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.5:s=1.5,scale=1280:720[v]"),
+    "tunnel": ("Tunnel", "[a]showcqt=s=720x720:sono_g=4:sono_v=24:bar_v=24:bar_g=3:axis=0,split[l][r];[r]hflip[rf];[l][rf]hstack,v360=input=e:output=fisheye:h_fov=180:v_fov=180:w=900:h=900:pitch=-90,rotate=a=t*0.5:c=black,crop=768:432,lagfun=decay=0.85,eq=contrast=1.6:gamma=1.6:brightness=0.12,format=yuv444p,pseudocolor=preset=turbo,hue=H=t*0.6:s=1.2,scale=1280:720[v]"),
+    "mandelbrot": ("Mandelbrot dive", "mandelbrot=s=640x360:r=30:maxiter=400:end_scale=0.002:end_pts=400[m];[a]showcqt=s=640x360:bar_g=4:sono_v=0:bar_v=16:axis=0[c];[m][c]blend=all_mode=screen,hue=H=t*0.5,scale=1280:720[v]"),
+    "bars": ("Frequency bars", "[a]showfreqs=s=1280x720:mode=bar:ascale=log:fscale=log:colors=0xE81123[v]"),
+    "waves": ("Waveform", "[a]showwaves=s=1280x720:mode=cline:colors=0xE81123|0x4FC3F7[v]"),
+    "scope": ("Stereo scope", "[a]avectorscope=s=720x720:zoom=1.5:draw=line:rc=232:gc=17:bc=35[v]"),
+}
+
 PAGES = [
     Page("player", "Player", groups=[
         ("History", [
@@ -388,6 +432,38 @@ PAGES = [
             S("norm_strength", "Normalize: target level", 75, lo=10, hi=100, step=5, suffix=" %",
               tip="How loud the normalized sound aims to be (MPC-BE: Normalize level)"),
         ]),
+        ("Visualizer", [
+            S("visualizer", "Music visualizer (audio files without a picture)", "spectrum",
+              [(k, v[0]) for k, v in VISUALIZERS.items()]),
+        ]),
+        ("Equalizer", [
+            S("eq_preset", "Equalizer", "off", [(k, v[0]) for k, v in EQ_PRESETS.items()],
+              tip="Custom uses the band sliders below"),
+            *[S(f"eq_{hz}", f"{label} (custom)", 0, lo=-12, hi=12, step=1, suffix=" dB")
+              for hz, label in EQ_BANDS],
+        ]),
+    ]),
+    Page("library", "Library", groups=[
+        ("Library", [
+            S("library_folders", "Movie and show folders", "", kind="text",
+              tip="Separate folders with ; (subfolders included). File > Library shows them as a thumbnail grid."),
+        ]),
+    ]),
+    Page("theme", "Theme", groups=[
+        ("Look", [
+            S("theme_accent", "Accent color (takes effect next time Iron Will opens)", "#E81123",
+              [("#E81123", "Iron Will red"), ("#1E88E5", "Steel blue"), ("#00C853", "Emerald"), ("#AA00FF", "Purple"),
+               ("#FF6D00", "Blaze orange"), ("#FFC400", "Gold"), ("#00E5FF", "Cyan"), ("#FF4081", "Hot pink"),
+               ("#9E9E9E", "Silver")]),
+        ]),
+    ]),
+    Page("network", "Network Sharing", groups=[
+        ("Share to TVs on your home network (DLNA)", [
+            S("dlna_always", "Share these folders whenever Iron Will is open", False,
+              tip="Roku Media Player, Samsung/LG smart TVs, game consoles and VLC list Iron Will as a media server"),
+            S("dlna_folders", "Folders to share", "", kind="text", tip="Separate folders with ; (subfolders included)"),
+            S("dlna_name", "Name shown on the TV", "Iron Will", kind="text"),
+        ]),
     ]),
     Page("subtitles", "Subtitles", groups=[
         ("Choosing subtitles", [
@@ -596,7 +672,21 @@ def _audio_filter_chain(v):
         chain.append("lavfi=[acompressor=threshold=0.08:ratio=6:attack=20:release=250:makeup=2]")
     if v.get("balance"):
         chain.append(f"lavfi=[stereotools=balance_out={max(-1.0, min(1.0, v['balance'] / 100.0)):.2f}]")
+    gains = eq_gains(v)
+    if any(gains):
+        bands = ",".join(f"equalizer=f={hz}:t=o:w=1:g={g}" for (hz, _), g in zip(EQ_BANDS, gains) if g)
+        # Boosting bands can clip; take the biggest boost back off the whole signal
+        pre = max(gains)
+        chain.append(f"lavfi=[{bands}" + (f",volume=-{pre}dB" if pre > 0 else "") + "]")
     return ",".join(chain)
+
+
+def eq_gains(v):
+    """dB for each equalizer band: the preset's, or the custom sliders when the preset is Custom."""
+    preset = EQ_PRESETS.get(v.get("eq_preset", "off"), EQ_PRESETS["off"])[1]
+    if preset is None:
+        return [int(v.get(f"eq_{hz}", 0)) for hz, _ in EQ_BANDS]
+    return list(preset)
 
 
 def apply_to_mpv(player, values, only=None):
@@ -616,7 +706,7 @@ def apply_to_mpv(player, values, only=None):
             player[name] = value
         except Exception as exc:  # mpv rejects unknown values or options it can't change while playing
             failed.append((s.label, str(exc).split("\n")[0][:120]))
-    if only is None or {"normalize", "night_mode", "balance", "gain", "norm_strength"} & set(only):
+    if only is None or ({"normalize", "night_mode", "balance", "gain", "norm_strength"} | EQ_KEYS) & set(only):
         try:
             player["af"] = _audio_filter_chain(values)
         except Exception as exc:
